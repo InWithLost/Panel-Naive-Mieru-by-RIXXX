@@ -288,6 +288,11 @@ try {
     try { db.exec('ROLLBACK'); } catch {}
     console.error('[DB] email-nullable migration skipped:', e.message);
   }
+  try {
+    db.prepare(`UPDATE users SET email = NULL WHERE email = ''`).run();
+  } catch (e) {
+    console.error('[DB] empty-email cleanup skipped:', e.message);
+  }
 } catch (err) {
   console.error('[DB] SQLite unavailable:', err.message, '— using in-memory store');
 }
@@ -312,11 +317,27 @@ function getUserByUsername(username) {
   if (db) return db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   return [...memUsers.values()].find(u => u.username === username);
 }
+function normalizeUserEmail(email) {
+  if (email === undefined || email === null) return null;
+  const value = String(email).trim();
+  return value ? value : null;
+}
+function getUserByEmail(email) {
+  const normalized = normalizeUserEmail(email);
+  if (!normalized) return null;
+  if (db) return db.prepare('SELECT * FROM users WHERE email = ?').get(normalized);
+  return [...memUsers.values()].find(u => normalizeUserEmail(u.email) === normalized);
+}
 function getUserById(id) {
   if (db) return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   return memUsers.get(id);
 }
+function isUniqueConstraintError(err, column) {
+  return err && err.code === 'SQLITE_CONSTRAINT_UNIQUE'
+    && String(err.message || '').includes(`users.${column}`);
+}
 function upsertUser(u) {
+  const row = { ...u, email: normalizeUserEmail(u.email), password: u.password || '' };
   if (db) {
     db.prepare(`
       INSERT INTO users
@@ -329,9 +350,9 @@ function upsertUser(u) {
         expiry=excluded.expiry, protocols=excluded.protocols,
         quotaMB=excluded.quotaMB, usedMB=excluded.usedMB,
         updatedAt=excluded.updatedAt, lastSeen=excluded.lastSeen
-    `).run({ ...u, password: u.password || '' });
+    `).run(row);
   } else {
-    memUsers.set(u.id, u);
+    memUsers.set(row.id, row);
   }
 }
 function deleteUser(id) {
@@ -1255,6 +1276,11 @@ app.post('/api/users', requireAuth, (req, res) => {
   if (getUserByUsername(username))
     return res.status(409).json({ error: 'Username already exists' });
 
+  const normalizedEmail = normalizeUserEmail(email);
+  const existingEmail = getUserByEmail(normalizedEmail);
+  if (existingEmail)
+    return res.status(409).json({ error: 'Email already exists' });
+
   if (expiry && isNaN(Date.parse(expiry)))
     return res.status(400).json({ error: 'expiry must be a valid ISO date string' });
 
@@ -1263,7 +1289,7 @@ app.post('/api/users', requireAuth, (req, res) => {
     id:        uuidv4(),
     // Email is optional: store NULL (not '') so the UNIQUE constraint allows
     // multiple users without an email.
-    email:     (email && email.trim()) ? email.trim() : null,
+    email:     normalizedEmail,
     username,
     passHash:  bcrypt.hashSync(password, 12),
     password,
@@ -1273,7 +1299,15 @@ app.post('/api/users', requireAuth, (req, res) => {
     usedMB:    0,
     createdAt: now, updatedAt: now, lastSeen: null
   };
-  upsertUser(user);
+  try {
+    upsertUser(user);
+  } catch (e) {
+    if (isUniqueConstraintError(e, 'username'))
+      return res.status(409).json({ error: 'Username already exists' });
+    if (isUniqueConstraintError(e, 'email'))
+      return res.status(409).json({ error: 'Email already exists' });
+    throw e;
+  }
 
   // Bug 6: rebuild Caddyfile + reload Caddy; rebuild mita state; report status
   const svcStatus = applyAllConfigs();
@@ -1301,9 +1335,14 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
   if (expiry !== undefined && expiry !== null && isNaN(Date.parse(expiry)))
     return res.status(400).json({ error: 'expiry must be a valid ISO date string' });
 
+  const normalizedEmail = email !== undefined ? normalizeUserEmail(email) : normalizeUserEmail(user.email);
+  const existingEmail = getUserByEmail(normalizedEmail);
+  if (existingEmail && existingEmail.id !== user.id)
+    return res.status(409).json({ error: 'Email already exists' });
+
   const updated = {
     ...user,
-    email:     email !== undefined ? ((email && email.trim()) ? email.trim() : null) : user.email,
+    email:     normalizedEmail,
     username:  username  ?? user.username,
     expiry:    expiry    !== undefined ? (expiry || null) : user.expiry,
     protocols: protocols
@@ -1318,7 +1357,15 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
     updated.passHash = bcrypt.hashSync(password, 12);
     updated.password = password;
   }
-  upsertUser(updated);
+  try {
+    upsertUser(updated);
+  } catch (e) {
+    if (isUniqueConstraintError(e, 'username'))
+      return res.status(409).json({ error: 'Username already exists' });
+    if (isUniqueConstraintError(e, 'email'))
+      return res.status(409).json({ error: 'Email already exists' });
+    throw e;
+  }
 
   const svcStatus = applyAllConfigs();
   audit('user:update', { id: updated.id, username: updated.username, protocols: validation.protocols || updated.protocols }, req.session.username);
@@ -2102,6 +2149,14 @@ cron.schedule('* * * * *', () => {
 
 // ── SPA catch-all ─────────────────────────────────────────────────────────────
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
+
+app.use((err, req, res, next) => {
+  console.error('[HTTP]', err);
+  if (res.headersSent) return next(err);
+  if (req.path.startsWith('/api/'))
+    return res.status(500).json({ error: 'Internal server error' });
+  res.status(500).type('text').send('Internal server error');
+});
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const HOST = process.env.PANEL_HOST || cfg.panelHost || '127.0.0.1';
