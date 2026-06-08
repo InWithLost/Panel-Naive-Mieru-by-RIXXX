@@ -49,6 +49,19 @@ stop_services() {
   fi
 }
 
+sync_panel_files() {
+  if [[ ! -d "$ROOT_DIR/panel" ]]; then
+    die "Missing panel source directory: $ROOT_DIR/panel"
+  fi
+
+  log "Syncing fresh panel files into $PANEL_DIR"
+  mkdir -p "$PANEL_DIR"
+  cp -a "$ROOT_DIR/panel/." "$PANEL_DIR/"
+  [[ -f "$ROOT_DIR/update.sh" ]] && cp "$ROOT_DIR/update.sh" "$PANEL_DIR/update.sh" 2>/dev/null || true
+  [[ -f "$ROOT_DIR/install.sh" ]] && cp "$ROOT_DIR/install.sh" "$PANEL_DIR/install.sh" 2>/dev/null || true
+  [[ -f "$ROOT_DIR/repair-caddy-public.sh" ]] && cp "$ROOT_DIR/repair-caddy-public.sh" "$PANEL_DIR/repair-caddy-public.sh" 2>/dev/null || true
+}
+
 rebuild_configs() {
   if [[ ! -f "$PANEL_CONFIG" ]]; then
     die "Missing panel config: $PANEL_CONFIG"
@@ -102,6 +115,7 @@ main() {
   stop_services
   cleanup_locks
   fix_permissions
+  sync_panel_files
   rebuild_configs
   fix_permissions
   restart_services
