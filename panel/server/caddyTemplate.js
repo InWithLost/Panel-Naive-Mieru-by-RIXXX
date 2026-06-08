@@ -95,10 +95,8 @@ return `{
   redir https://{host}{uri} permanent
 }
 
-:${port}, ${domain} {
-  tls ${email}
-
-${panelBlock}
+${domain} {
+  ${panelBlock}
   forward_proxy {
 ${authLines}
     hide_ip

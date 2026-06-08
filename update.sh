@@ -414,10 +414,8 @@ if (fs.existsSync(TEMPLATE_JS)) {
     '  redir https://{host}{uri} permanent',
     '}',
     '',
-    // Bug 83: ':<port>, <domain>' listener + explicit tls + no route{} wrapper
-    ':' + (cfg.naivePort || 443) + ', ' + (cfg.domain || 'localhost') + ' {',
-    '  tls ' + (cfg.adminEmail || ''),
-    '',
+    // Bug 83: host-based HTTPS site; Caddy automates TLS for the domain.
+    (cfg.domain || 'localhost') + ' {',
     panelBlock,
     '  forward_proxy {',
     authLines,

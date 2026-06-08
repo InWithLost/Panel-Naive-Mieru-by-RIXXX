@@ -676,14 +676,13 @@ write_caddyfile() {
   redir https://{host}{uri} permanent
 }
 
-:${NAIVE_PORT}, ${DOMAIN} {
+${DOMAIN} {
   # Bug 83 / Bug 88: known-good reference server. Listener is the catch-all
   # port plus domain on one site-address line, explicit tls, no route wrapper.
   # NOTE: keep this comment free of double-quote and angle-bracket chars -
   # caddyfile_content is a double-quoted shell assignment, so a stray quote
   # would close the string and a colon-redirect would be parsed as a file
   # ('line 665: port: No such file or directory' was Bug 88).
-  tls ${ADMIN_EMAIL}
 
 ${panel_block}
   forward_proxy {
@@ -1428,6 +1427,7 @@ main() {
 }
 
 main "$@"
+
 
 
 

@@ -560,10 +560,8 @@ function buildCaddyfile(config, users) {
   redir https://{host}{uri} permanent
 }
 
-:${config.naivePort || 443}, ${config.domain || 'localhost'} {
-  # Bug 83: match the known-good reference server exactly (":<port>, <domain>"
-  # listener + explicit tls + no route{} wrapper).
-  tls ${config.adminEmail || ''}
+${config.domain || 'localhost'} {
+  # Bug 83: host-based HTTPS site; Caddy will automate TLS for the domain.
 
 ${panelBlock}
   forward_proxy {
