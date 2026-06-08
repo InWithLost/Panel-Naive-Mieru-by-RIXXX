@@ -82,7 +82,7 @@ ssh -L 3000:127.0.0.1:3000 root@<ip-сервера>
 ### Публичный режим
 ```bash
 sudo bash update.sh --expose vpn.example.com
-# Панель доступна по: http://vpn.example.com:8080/
+# Панель доступна по адресу, который покажет установщик / update.sh
 ```
 
 ---

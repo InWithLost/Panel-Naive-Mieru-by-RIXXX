@@ -954,7 +954,9 @@ do_expose() {
     mv /tmp/cfg.tmp "$PANEL_CONFIG"
 
   ufw allow "${PANEL_PORT}/tcp" comment "Panel Web UI" 2>/dev/null || true
-  pm2 restart panel-naive-mieru 2>/dev/null || true
+  PANEL_HOST="0.0.0.0" PANEL_PORT="$PANEL_PORT" PANEL_PATH="$PANEL_PATH" \
+    pm2 restart panel-naive-mieru --update-env 2>/dev/null || \
+    pm2 restart panel-naive-mieru 2>/dev/null || true
   log_info "Panel accessible at http://$EXPOSE_DOMAIN:${PANEL_PORT}${PANEL_PATH}/ ✓"
 }
 
@@ -970,7 +972,9 @@ do_ssh_only() {
     mv /tmp/cfg.tmp "$PANEL_CONFIG"
 
   ufw delete allow "${PANEL_PORT}/tcp" 2>/dev/null || true
-  pm2 restart panel-naive-mieru 2>/dev/null || true
+  PANEL_HOST="127.0.0.1" PANEL_PORT="$PANEL_PORT" PANEL_PATH="$PANEL_PATH" \
+    pm2 restart panel-naive-mieru --update-env 2>/dev/null || \
+    pm2 restart panel-naive-mieru 2>/dev/null || true
   log_info "Panel now SSH-only (127.0.0.1:${PANEL_PORT}${PANEL_PATH}) ✓"
 
   local server_ip; server_ip=$(jq -r '.serverIp' "$PANEL_CONFIG")

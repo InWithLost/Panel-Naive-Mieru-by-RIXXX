@@ -472,10 +472,12 @@ gather_config() {
 
   # Expose panel
   echo ""
-  echo -e "${YELLOW}$(t 'Панель работает на 127.0.0.1:3000 (только через SSH-туннель, по умолчанию).' \
-                       'Panel runs on 127.0.0.1:3000 (SSH-only by default).')${NC}"
-  read -rp "$(echo -e "${CYAN}$(t 'Открыть панель публично на порту 8080?' 'Expose panel publicly on port 8080?')${NC} [$(t 'д/Н' 'y/N')]: ")" INPUT_EXPOSE
+  echo -e "${YELLOW}$(t 'Панель по умолчанию работает только через SSH-туннель; при установке будет выбран случайный порт и путь для публичного доступа.' \
+                       'Panel is SSH-only by default; installation will choose a random port and path for public access if enabled.')${NC}"
+  read -rp "$(echo -e "${CYAN}$(t 'Открыть панель публично? Порт и путь будут выбраны автоматически.' 'Expose panel publicly? Port and path will be chosen automatically.')${NC} [$(t 'д/Н' 'y/N')]: ")" INPUT_EXPOSE
   EXPOSE_PANEL="${INPUT_EXPOSE:-N}"
+  PANEL_PORT=$(python3 -c 'import random; print(random.randint(20000, 59999))' 2>/dev/null || echo 3000)
+  PANEL_PATH=$(python3 -c 'import secrets; print("/admin-" + secrets.token_urlsafe(12).replace("-","").replace("_",""))' 2>/dev/null || echo /admin)
 
   echo ""
   log_info "$(t 'Конфигурация собрана ✓' 'Configuration gathered ✓')"
@@ -913,11 +915,16 @@ write_config_json() {
   mkdir -p /etc/rixxx-panel "$(dirname "$DB_PATH")"
   local server_ip
   server_ip=$(curl -4 -fsSL https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
-  local panel_port panel_path
-  panel_port=$(python3 -c 'import random; print(random.randint(20000, 59999))' 2>/dev/null || echo 3000)
-  panel_path=$(python3 -c 'import secrets; print("/admin-" + secrets.token_urlsafe(12).replace("-","").replace("_",""))' 2>/dev/null || echo /admin)
-  PANEL_PORT="$panel_port"
-  PANEL_PATH="$panel_path"
+  local panel_port="${PANEL_PORT:-}"
+  local panel_path="${PANEL_PATH:-}"
+  if [[ -z "$panel_port" ]]; then
+    panel_port=$(python3 -c 'import random; print(random.randint(20000, 59999))' 2>/dev/null || echo 3000)
+    PANEL_PORT="$panel_port"
+  fi
+  if [[ -z "$panel_path" ]]; then
+    panel_path=$(python3 -c 'import secrets; print("/admin-" + secrets.token_urlsafe(12).replace("-","").replace("_",""))' 2>/dev/null || echo /admin)
+    PANEL_PATH="$panel_path"
+  fi
 
   # Generate bcrypt hash via Node (rounds=12).
   # Bug 73 (P0): the password is passed via the RIXXX_ADMIN_PASS env var, NOT
@@ -1140,9 +1147,8 @@ except Exception:
   cd "$PANEL_DIR"
   local panel_host="127.0.0.1"
   [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]] && panel_host="0.0.0.0"
-  local panel_port panel_path
-  panel_port=$(jq -r '.panelPort // 3000' "$PANEL_CONFIG")
-  panel_path=$(jq -r '.panelPath // "/admin"' "$PANEL_CONFIG")
+  local panel_port="${PANEL_PORT:-3000}"
+  local panel_path="${PANEL_PATH:-/admin}"
   pm2 delete panel-naive-mieru 2>/dev/null || true
   PANEL_HOST="$panel_host" PANEL_PORT="$panel_port" PANEL_PATH="$panel_path" \
     pm2 start server/index.js \
