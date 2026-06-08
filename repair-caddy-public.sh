@@ -59,6 +59,7 @@ sync_panel_files() {
   cp -a "$ROOT_DIR/panel/." "$PANEL_DIR/"
   [[ -f "$ROOT_DIR/update.sh" ]] && cp "$ROOT_DIR/update.sh" "$PANEL_DIR/update.sh" 2>/dev/null || true
   [[ -f "$ROOT_DIR/install.sh" ]] && cp "$ROOT_DIR/install.sh" "$PANEL_DIR/install.sh" 2>/dev/null || true
+  [[ -f "$ROOT_DIR/panel-db.sh" ]] && cp "$ROOT_DIR/panel-db.sh" "$PANEL_DIR/panel-db.sh" 2>/dev/null || true
   [[ -f "$ROOT_DIR/repair-caddy-public.sh" ]] && cp "$ROOT_DIR/repair-caddy-public.sh" "$PANEL_DIR/repair-caddy-public.sh" 2>/dev/null || true
 }
 
