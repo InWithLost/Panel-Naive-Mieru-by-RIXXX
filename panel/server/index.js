@@ -8,7 +8,7 @@
  *   applyAllConfigs()          — rebuilds Caddyfile + applies Mita config in one call
  *   /api/services/rebuild-all  — endpoint used by update.sh --repair
  *
- * v1.2.5 hotfixes:
+ * v1.2.6 hardening:
  *   Bug 44: buildCaddyfile() skips users without plaintext password (logs warning)
  *   Bug 50: reloadCaddy() uses only systemctl reload — pgrep fallback removed
  *   Bug 51: buildMitaStateFile() uses safe defaults for mieruPortStart/End
@@ -35,6 +35,7 @@ const { WebSocketServer } = require('ws');
 const fs             = require('fs');
 const path           = require('path');
 const { execSync, execFileSync } = require('child_process');
+const crypto         = require('crypto');
 const si             = require('systeminformation');
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
@@ -49,6 +50,10 @@ const CADDY_FILE        = '/etc/caddy-naive/Caddyfile';
 const FAKE_SITE_DIR     = '/var/www/fake-site';
 const LOG_CADDY         = '/var/log/caddy-naive/access.log';
 const LOG_PANEL         = '/var/log/panel-naive-mieru.log';
+const VERSION_FILE      = '/etc/rixxx-panel/version';
+const UPDATE_SH         = fs.existsSync(path.join(__dirname, '..', '..', 'update.sh'))
+  ? path.join(__dirname, '..', '..', 'update.sh')
+  : path.join(__dirname, '..', 'update.sh');
 
 // Legacy path kept for migration detection only
 const LEGACY_NAIVE_BIN = '/usr/local/bin/naive';
@@ -63,7 +68,7 @@ try {
     adminUser: 'admin',
     adminPassHash: bcrypt.hashSync('admin', 12),
     naivePort: 443, mieruPortStart: 2012, mieruPortEnd: 2022,
-    panelPort: 3000, panelHost: '127.0.0.1', exposePanel: false,
+    panelPort: 3000, panelHost: '127.0.0.1', panelPath: '/admin', exposePanel: false,
     dbPath:        DB_PATH,
     caddyBin:      CADDY_BIN,
     caddyFile:     CADDY_FILE,
@@ -84,6 +89,113 @@ try {
 }
 
 // Resolved paths (prefer config values, fall back to constants)
+function clampInt(value, min, max, fallback) {
+  const n = parseInt(value, 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function normalizePanelPath(value) {
+  let s = String(value || '').trim();
+  if (!s || s === '/') return '/admin';
+  if (!s.startsWith('/')) s = '/' + s;
+  s = s.replace(/\/+$/g, '');
+  s = s.replace(/[^a-zA-Z0-9/_-]/g, '');
+  if (!s || s === '/') return '/admin';
+  return s;
+}
+
+function normalizeConfig(input = {}) {
+  const base = {
+    domain: 'localhost',
+    serverIp: '127.0.0.1',
+    adminUser: 'admin',
+    adminPassHash: bcrypt.hashSync('admin', 12),
+    naivePort: 443,
+    mieruPortStart: 2012,
+    mieruPortEnd: 2022,
+    panelPort: 3000,
+    panelHost: '127.0.0.1',
+    panelPath: '/admin',
+    exposePanel: false,
+    dbPath: DB_PATH,
+    caddyBin: CADDY_BIN,
+    caddyFile: CADDY_FILE,
+    caddyConfigDir: CADDY_CONFIG_DIR,
+    fakeSiteDir: FAKE_SITE_DIR,
+    fakeSiteUrl: 'https://www.example.com',
+    adminEmail: '',
+    probeSecret: '',
+    probeMode: 'bare',
+    mitaStateFile: MITA_STATE_FILE,
+    trafficPattern: 'NOOP',
+    mtu: 1400,
+    udpEnabled: false,
+    cascadeEnabled: false,
+    cascadeNaiveUpstream: '',
+    cascadeMieru: { host: '', portStart: 2012, portEnd: 2022, user: '', pass: '', mtu: 1400 },
+    cascadeMieruEgress: {},
+    language: 'ru',
+    version: '1.2.6'
+  };
+  const cfg2 = {
+    ...base,
+    ...input,
+    cascadeMieru: {
+      ...base.cascadeMieru,
+      ...(input.cascadeMieru && typeof input.cascadeMieru === 'object' ? input.cascadeMieru : {})
+    },
+    cascadeMieruEgress: {
+      ...base.cascadeMieruEgress,
+      ...(input.cascadeMieruEgress && typeof input.cascadeMieruEgress === 'object' ? input.cascadeMieruEgress : {})
+    }
+  };
+  cfg2.domain = String(cfg2.domain || base.domain).trim() || base.domain;
+  cfg2.serverIp = String(cfg2.serverIp || base.serverIp).trim() || base.serverIp;
+  cfg2.panelHost = String(cfg2.panelHost || base.panelHost).trim() || base.panelHost;
+  cfg2.panelPath = normalizePanelPath(cfg2.panelPath || base.panelPath);
+  cfg2.fakeSiteUrl = String(cfg2.fakeSiteUrl || base.fakeSiteUrl).trim() || base.fakeSiteUrl;
+  cfg2.adminEmail = String(cfg2.adminEmail || '').trim();
+  cfg2.adminUser = String(cfg2.adminUser || base.adminUser).trim() || base.adminUser;
+  cfg2.naivePort = clampInt(cfg2.naivePort, 1, 65535, base.naivePort);
+  cfg2.mieruPortStart = clampInt(cfg2.mieruPortStart, 1, 65535, base.mieruPortStart);
+  cfg2.mieruPortEnd = clampInt(cfg2.mieruPortEnd, 1, 65535, base.mieruPortEnd);
+  if (cfg2.mieruPortEnd < cfg2.mieruPortStart) cfg2.mieruPortEnd = cfg2.mieruPortStart;
+  cfg2.panelPort = clampInt(cfg2.panelPort, 1, 65535, base.panelPort);
+  cfg2.trafficPattern = ['NOOP', 'RANDOM_PADDING', 'RANDOM_PADDING_AGGRESSIVE', 'CUSTOM'].includes(cfg2.trafficPattern)
+    ? cfg2.trafficPattern
+    : base.trafficPattern;
+  cfg2.mtu = clampInt(cfg2.mtu, 1280, 1400, base.mtu);
+  cfg2.udpEnabled = cfg2.udpEnabled === true || cfg2.udpEnabled === 'true';
+  cfg2.exposePanel = cfg2.exposePanel === true || cfg2.exposePanel === 'true';
+  cfg2.cascadeEnabled = cfg2.cascadeEnabled === true || cfg2.cascadeEnabled === 'true';
+  cfg2.cascadeNaiveUpstream = String(cfg2.cascadeNaiveUpstream || '').trim();
+  cfg2.language = ['ru', 'en'].includes(cfg2.language) ? cfg2.language : base.language;
+  cfg2.version = String(cfg2.version || base.version).trim() || base.version;
+  cfg2.probeSecret = String(cfg2.probeSecret || '').trim();
+  cfg2.probeMode = ['off', 'bare', 'secret'].includes(String(cfg2.probeMode || '').trim().toLowerCase())
+    ? String(cfg2.probeMode).trim().toLowerCase()
+    : (cfg2.probeSecret ? 'secret' : 'bare');
+  cfg2.dbPath = String(cfg2.dbPath || DB_PATH).trim() || DB_PATH;
+  cfg2.caddyBin = String(cfg2.caddyBin || CADDY_BIN).trim() || CADDY_BIN;
+  cfg2.caddyFile = String(cfg2.caddyFile || CADDY_FILE).trim() || CADDY_FILE;
+  cfg2.caddyConfigDir = String(cfg2.caddyConfigDir || CADDY_CONFIG_DIR).trim() || CADDY_CONFIG_DIR;
+  cfg2.fakeSiteDir = String(cfg2.fakeSiteDir || FAKE_SITE_DIR).trim() || FAKE_SITE_DIR;
+  cfg2.mitaStateFile = String(cfg2.mitaStateFile || MITA_STATE_FILE).trim() || MITA_STATE_FILE;
+  cfg2.cascadeMieru.host = String(cfg2.cascadeMieru.host || '').trim();
+  cfg2.cascadeMieru.portStart = clampInt(cfg2.cascadeMieru.portStart, 1, 65535, base.cascadeMieru.portStart);
+  cfg2.cascadeMieru.portEnd = clampInt(cfg2.cascadeMieru.portEnd, 1, 65535, base.cascadeMieru.portEnd);
+  if (cfg2.cascadeMieru.portEnd < cfg2.cascadeMieru.portStart) cfg2.cascadeMieru.portEnd = cfg2.cascadeMieru.portStart;
+  cfg2.cascadeMieru.user = String(cfg2.cascadeMieru.user || '').trim();
+  cfg2.cascadeMieru.pass = typeof cfg2.cascadeMieru.pass === 'string' ? cfg2.cascadeMieru.pass : '';
+  cfg2.cascadeMieru.mtu = clampInt(cfg2.cascadeMieru.mtu, 1280, 1400, base.cascadeMieru.mtu);
+  return cfg2;
+}
+
+cfg = normalizeConfig(cfg);
+const PANEL_BASE_PATH = normalizePanelPath(cfg.panelPath);
+cfg.panelPath = PANEL_BASE_PATH;
+
 const resolvedDb        = cfg.dbPath        || DB_PATH;
 const resolvedMitaFile  = cfg.mitaStateFile || MITA_STATE_FILE;
 const resolvedCaddyFile = cfg.caddyFile     || CADDY_FILE;
@@ -123,6 +235,13 @@ try {
     CREATE TABLE IF NOT EXISTS panel_settings (
       key   TEXT PRIMARY KEY,
       value TEXT
+    );
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts      TEXT NOT NULL,
+      actor   TEXT NOT NULL,
+      action  TEXT NOT NULL,
+      details TEXT NOT NULL DEFAULT '{}'
     );
   `);
   // Migrate: add password column if missing (upgrade from v1.0.x)
@@ -176,6 +295,14 @@ try {
 // In-memory fallback
 const memUsers = new Map();
 
+function audit(action, details = {}, actor = 'system') {
+  if (!db) return;
+  try {
+    db.prepare('INSERT INTO audit_log (ts, actor, action, details) VALUES (?, ?, ?, ?)')
+      .run(new Date().toISOString(), actor, action, JSON.stringify(details));
+  } catch {}
+}
+
 // ── User DB helpers ───────────────────────────────────────────────────────────
 function getAllUsers() {
   if (db) return db.prepare('SELECT * FROM users ORDER BY createdAt DESC').all();
@@ -217,12 +344,61 @@ function deleteUser(id) {
 //         if the process is interrupted during the write.
 function saveConfig() {
   try {
+    cfg = normalizeConfig(cfg);
     const dir = path.dirname(PANEL_CONFIG);
     fs.mkdirSync(dir, { recursive: true });
     const tmp = PANEL_CONFIG + '.new';
     fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, PANEL_CONFIG);   // atomic replace
   } catch (e) { console.error('[CFG]', e.message); }
+}
+
+function getCurrentVersion() {
+  try {
+    const raw = fs.readFileSync(VERSION_FILE, 'utf8');
+    const m = raw.match(/^panel_version=(.+)$/m);
+    return (m?.[1] || cfg.version || '0.0.0').trim();
+  } catch {
+    return cfg.version || '0.0.0';
+  }
+}
+
+function versionGt(a, b) {
+  const pa = String(a || '0').split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map(n => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da > db) return true;
+    if (da < db) return false;
+  }
+  return false;
+}
+
+function runUpdateScript(args = [], timeout = 30 * 60 * 1000) {
+  const script = fs.existsSync(UPDATE_SH) ? UPDATE_SH : null;
+  if (!script) throw new Error('update.sh not found on server');
+  return execFileSync('bash', [script, ...args], {
+    timeout,
+    maxBuffer: 10 * 1024 * 1024,
+    env: process.env,
+  }).toString();
+}
+
+function syncAutoUpdateCron(enabled) {
+  const script = fs.existsSync(UPDATE_SH) ? UPDATE_SH : null;
+  if (!script) throw new Error('update.sh not found on server');
+  const cronPath = '/etc/cron.d/rixxx-panel-update';
+  const content = [
+    '# Panel Naive + Mieru auto-update',
+    '# Managed by the admin panel. The script exits immediately when disabled.',
+    `17 3 * * * root cd "${path.dirname(script)}" && /bin/bash "${script}" --auto -y >> /var/log/rixxx-panel-update.log 2>&1`,
+    ''
+  ].join('\n');
+  fs.mkdirSync(path.dirname(cronPath), { recursive: true });
+  fs.writeFileSync(cronPath, content, { mode: 0o644 });
+  return { enabled, cronPath };
 }
 
 // ── buildCaddyfile() ─────────────────────────────────────────────────────────
@@ -407,18 +583,18 @@ ${authLines}
 function fixCaddyPerms() {
   try {
     // Dir: root:caddy 750 so the caddy group can traverse + list.
-    execSync(`chown root:caddy '${resolvedCaddyCfgDir}' 2>/dev/null || true`, { timeout: 5000 });
-    execSync(`chmod 750 '${resolvedCaddyCfgDir}' 2>/dev/null || true`, { timeout: 5000 });
+    try { execFileSync('chown', ['root:caddy', resolvedCaddyCfgDir], { timeout: 5000 }); } catch {}
+    try { execFileSync('chmod', ['750', resolvedCaddyCfgDir], { timeout: 5000 }); } catch {}
     // Caddyfile: root:caddy 640 so the caddy group can read it.
     if (fs.existsSync(resolvedCaddyFile)) {
-      execSync(`chown root:caddy '${resolvedCaddyFile}' 2>/dev/null || true`, { timeout: 5000 });
-      execSync(`chmod 640 '${resolvedCaddyFile}' 2>/dev/null || true`, { timeout: 5000 });
+      try { execFileSync('chown', ['root:caddy', resolvedCaddyFile], { timeout: 5000 }); } catch {}
+      try { execFileSync('chmod', ['640', resolvedCaddyFile], { timeout: 5000 }); } catch {}
     }
     // probe_secret: root:caddy 640 so caddy can read it for probe_resistance.
     const probeFile = path.join(resolvedCaddyCfgDir, 'probe_secret');
     if (fs.existsSync(probeFile)) {
-      execSync(`chown root:caddy '${probeFile}' 2>/dev/null || true`, { timeout: 5000 });
-      execSync(`chmod 640 '${probeFile}' 2>/dev/null || true`, { timeout: 5000 });
+      try { execFileSync('chown', ['root:caddy', probeFile], { timeout: 5000 }); } catch {}
+      try { execFileSync('chmod', ['640', probeFile], { timeout: 5000 }); } catch {}
     }
   } catch (e) {
     console.warn('[CADDY] fixCaddyPerms (non-fatal):', e.message);
@@ -453,15 +629,15 @@ function applyCaddyConfig() {
   try {
     // Clear any prior failure storm so the restart isn't blocked by
     // "Start request repeated too quickly".
-    try { execSync('systemctl reset-failed caddy-naive 2>/dev/null || true', { timeout: 5000 }); } catch {}
-    execSync('systemctl restart caddy-naive', { timeout: 20000 });
+    try { execFileSync('systemctl', ['reset-failed', 'caddy-naive'], { timeout: 5000 }); } catch {}
+    execFileSync('systemctl', ['restart', 'caddy-naive'], { timeout: 20000 });
   } catch (e) {
     lastCaddyError = collectCaddyError(e);
     return { ok: false, error: lastCaddyError };
   }
   // Verify the service actually came up and stayed up.
   let active = '';
-  try { active = execSync('systemctl is-active caddy-naive 2>/dev/null', { timeout: 5000 }).toString().trim(); }
+  try { active = execFileSync('systemctl', ['is-active', 'caddy-naive'], { timeout: 5000 }).toString().trim(); }
   catch (e) { active = (e.stdout ? e.stdout.toString().trim() : '') || 'inactive'; }
   if (active !== 'active') {
     lastCaddyError = collectCaddyError(null) || `caddy-naive is ${active || 'inactive'}`;
@@ -475,7 +651,7 @@ function applyCaddyConfig() {
 function collectCaddyError(err) {
   let msg = '';
   try {
-    const j = execSync('journalctl -u caddy-naive -n 20 --no-pager 2>/dev/null', { timeout: 5000 }).toString();
+    const j = execFileSync('journalctl', ['-u', 'caddy-naive', '-n', '20', '--no-pager'], { timeout: 5000 }).toString();
     // Surface the lines that actually explain the failure.
     const hot = j.split('\n').filter(l =>
       /permission denied|error|insecure schemes|repeated too quickly|invalid|adapt|loading/i.test(l));
@@ -501,11 +677,11 @@ function restartCaddy() {
 
 // ── Bug 7: UFW single-port helper ────────────────────────────────────────────
 function ufwMieruRule(action, start, end, proto, comment) {
-  const commentPart = comment ? ` comment "${comment}"` : '';
-  const cmd = (start === end)
-    ? `ufw ${action} allow ${start}/${proto}${commentPart} 2>/dev/null || true`
-    : `ufw ${action} allow ${start}:${end}/${proto}${commentPart} 2>/dev/null || true`;
-  try { execSync(cmd, { timeout: 5000 }); } catch {}
+  const args = action === 'delete'
+    ? ['delete', 'allow', start === end ? `${start}/${proto}` : `${start}:${end}/${proto}`]
+    : ['allow', start === end ? `${start}/${proto}` : `${start}:${end}/${proto}`];
+  if (comment) args.push('comment', comment);
+  try { execFileSync('ufw', args, { timeout: 5000 }); } catch {}
 }
 
 // ── Mieru state JSON builder ──────────────────────────────────────────────────
@@ -578,7 +754,7 @@ function buildMitaStateFile() {
 function applyMitaConfig() {
   const file = buildMitaStateFile();
   try {
-    execSync(`mita apply config ${file} 2>/dev/null`, { timeout: 15000 });
+    execFileSync('mita', ['apply', 'config', file], { timeout: 15000 });
 
     // Bug 75: a fresh mita install sits in state IDLE (the installer does NOT
     // start it while users[] is empty — Bug 4). `mita reload` only re-reads the
@@ -586,16 +762,16 @@ function applyMitaConfig() {
     // the proxy never starts listening and mieru clients can't connect.
     // Therefore: detect status and `mita start` when IDLE, otherwise `reload`.
     let status = '';
-    try { status = execSync('mita status 2>/dev/null', { timeout: 10000 }).toString(); }
+    try { status = execFileSync('mita', ['status'], { timeout: 10000 }).toString(); }
     catch { status = ''; }
 
     if (/RUNNING/i.test(status)) {
-      execSync('mita reload 2>/dev/null', { timeout: 15000 });
+      execFileSync('mita', ['reload'], { timeout: 15000 });
     } else {
       // IDLE (or unknown): start the service so it binds the configured ports.
       // Fall back to systemctl restart if `mita start` is unavailable.
-      try { execSync('mita start 2>/dev/null', { timeout: 15000 }); }
-      catch { execSync('systemctl restart mita 2>/dev/null || true', { timeout: 15000 }); }
+      try { execFileSync('mita', ['start'], { timeout: 15000 }); }
+      catch { try { execFileSync('systemctl', ['restart', 'mita'], { timeout: 15000 }); } catch {} }
     }
 
     shredFile(file + '.last');
@@ -605,10 +781,11 @@ function applyMitaConfig() {
 
 function restartMieru() {
   try {
-    execSync('mita stop 2>/dev/null || true', { timeout: 10000 });
+    try { execFileSync('mita', ['stop'], { timeout: 10000 }); } catch {}
     const file = buildMitaStateFile();
-    execSync(`mita apply config ${file} 2>/dev/null`, { timeout: 10000 });
-    execSync('mita start 2>/dev/null || systemctl start mita 2>/dev/null', { timeout: 15000 });
+    execFileSync('mita', ['apply', 'config', file], { timeout: 10000 });
+    try { execFileSync('mita', ['start'], { timeout: 15000 }); }
+    catch { execFileSync('systemctl', ['start', 'mita'], { timeout: 15000 }); }
     shredFile(file + '.last');
     return true;
   } catch { return false; }
@@ -645,7 +822,7 @@ function runCascadeMieru(action, opts = {}) {
 
 function shredFile(fp) {
   if (!fp || !fs.existsSync(fp)) return;
-  try { execSync(`shred -u "${fp}" 2>/dev/null`, { timeout: 5000 }); }
+  try { execFileSync('shred', ['-u', fp], { timeout: 5000 }); }
   catch { try { fs.unlinkSync(fp); } catch {} }
 }
 
@@ -683,7 +860,7 @@ function naiveCascadeStatusText() {
   // 2) caddy-naive validate
   let validate = 'unknown';
   try {
-    execSync(`${CADDY_BIN} validate --config '${resolvedCaddyFile}' --adapter caddyfile 2>&1`, { timeout: 15000 });
+    execFileSync(CADDY_BIN, ['validate', '--config', resolvedCaddyFile, '--adapter', 'caddyfile'], { timeout: 15000 });
     validate = 'Valid';
   } catch (e) {
     const out = ((e.stdout && e.stdout.toString()) || (e.stderr && e.stderr.toString()) || e.message || '').trim();
@@ -693,7 +870,7 @@ function naiveCascadeStatusText() {
 
   // 3) systemctl is-active caddy-naive
   let active = 'unknown';
-  try { active = execSync('systemctl is-active caddy-naive 2>/dev/null', { timeout: 5000 }).toString().trim(); }
+  try { active = execFileSync('systemctl', ['is-active', 'caddy-naive'], { timeout: 5000 }).toString().trim(); }
   catch (e) { active = (e.stdout ? e.stdout.toString().trim() : '') || 'inactive'; }
   lines.push(`caddy-naive    : ${active}`);
   if (active !== 'active') {
@@ -707,10 +884,12 @@ function naiveCascadeStatusText() {
     try {
       // -x routes through the exit's forward proxy; api.ipify.org returns the
       // public IP the request egressed from (= exit node IP when cascade works).
-      egress = execSync(
-        `curl -fsS --max-time 12 -x '${upstream}' https://api.ipify.org 2>/dev/null`,
-        { timeout: 15000 }
-      ).toString().trim();
+      egress = execFileSync('curl', [
+        '-fsS',
+        '--max-time', '12',
+        '-x', upstream,
+        'https://api.ipify.org'
+      ], { timeout: 15000 }).toString().trim();
     } catch (e) {
       egress = 'FAILED (' + ((e.stderr && e.stderr.toString().trim()) || e.message || 'no response') + ')';
     }
@@ -750,6 +929,10 @@ function applyAllConfigs() {
 // ── Express app ───────────────────────────────────────────────────────────────
 const app    = express();
 const server = http.createServer(app);
+app.disable('x-powered-by');
+if (process.env.PANEL_TRUST_PROXY === '1') {
+  app.set('trust proxy', 1);
+}
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -795,13 +978,55 @@ app.use(session({
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false, httpOnly: true, maxAge: 86400000 }
+  cookie: { secure: 'auto', httpOnly: true, sameSite: 'lax', maxAge: 86400000 }
 }));
+
+function ensureCsrfToken(req) {
+  if (!req.session) return '';
+  if (!req.session.csrfToken) req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+  return req.session.csrfToken;
+}
+
+function requireCsrf(req, res, next) {
+  const expected = req.session?.csrfToken;
+  const actual = req.get('x-csrf-token');
+  if (!expected || !actual || actual !== expected) {
+    return res.status(403).json({ error: 'CSRF token missing or invalid' });
+  }
+  return next();
+}
 
 // Rate limits
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20,  message: { error: 'Too many attempts' } });
 const apiLimiter   = rateLimit({ windowMs:      60 * 1000, max: 300, message: { error: 'Rate limit exceeded' } });
 app.use('/api/', apiLimiter);
+app.use('/api/', (req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  if (req.path === '/login') return next();
+  return requireCsrf(req, res, next);
+});
+
+app.use((req, res, next) => {
+  if (PANEL_BASE_PATH === '/') return next();
+  if (req.path === '/healthz' || req.path === '/favicon.ico') return next();
+  const urlPath = req.path || '/';
+  if (urlPath === PANEL_BASE_PATH || urlPath.startsWith(PANEL_BASE_PATH + '/')) {
+    req.url = req.url.slice(PANEL_BASE_PATH.length) || '/';
+    if (req.url === '') req.url = '/';
+    return next();
+  }
+  if (urlPath === '/' || urlPath === '') {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      return res.redirect(302, `${PANEL_BASE_PATH}/`);
+    }
+    return res.status(404).json({ error: 'Not Found' });
+  }
+  return res.status(404).json({ error: 'Not Found' });
+});
+
+app.get('/healthz', (_req, res) => {
+  res.json({ ok: true, uptime: Math.floor(process.uptime()), ts: new Date().toISOString() });
+});
 
 // Static files
 app.use(express.static(path.join(__dirname, '../public')));
@@ -827,15 +1052,19 @@ app.post('/api/login', loginLimiter, (req, res) => {
   if (!isAdmin) return res.status(401).json({ error: 'Invalid credentials' });
   req.session.authenticated = true;
   req.session.username = username;
-  res.json({ ok: true, username });
+  req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+  audit('login', { username }, username);
+  res.json({ ok: true, username, csrfToken: req.session.csrfToken });
 });
 
-app.post('/api/logout', (req, res) => {
+app.post('/api/logout', requireAuth, requireCsrf, (req, res) => {
+  const username = req.session.username;
+  audit('logout', {}, username);
   req.session.destroy(() => res.json({ ok: true }));
 });
 
 app.get('/api/me', requireAuth, (req, res) => {
-  res.json({ username: req.session.username, authenticated: true });
+  res.json({ username: req.session.username, authenticated: true, csrfToken: ensureCsrfToken(req) });
 });
 
 // ── Config API ────────────────────────────────────────────────────────────────
@@ -869,6 +1098,13 @@ app.post('/api/config', requireAuth, (req, res) => {
     if (req.body[k] !== undefined) cfg[k] = req.body[k];
   });
   saveConfig();
+  audit('config:update', {
+    fields: Object.keys(req.body || {}).filter(k => [
+      'domain','naivePort','mieruPortStart','mieruPortEnd',
+      'trafficPattern','mtu','udpEnabled','adminEmail','language',
+      'probeSecret','fakeSiteUrl'
+    ].includes(k))
+  }, req.session.username);
   const { adminPassHash, ...safe } = cfg;
   res.json({ ok: true, cfg: safe });
 });
@@ -881,7 +1117,54 @@ app.post('/api/config/password', requireAuth, (req, res) => {
   if (!valid) return res.status(401).json({ error: 'Current password incorrect' });
   cfg.adminPassHash = bcrypt.hashSync(newPass, 12);
   saveConfig();
+  audit('admin:password_change', {}, req.session.username);
   res.json({ ok: true });
+});
+
+app.get('/api/update/status', requireAuth, (req, res) => {
+  const currentVersion = getCurrentVersion();
+  const targetVersion = cfg.version || '1.2.6';
+  const panelHost = cfg.panelHost || '127.0.0.1';
+  const panelUrl = panelHost === '0.0.0.0'
+    ? `http://${cfg.serverIp || '127.0.0.1'}:${cfg.panelPort}${cfg.panelPath}/`
+    : `http://${panelHost}:${cfg.panelPort}${cfg.panelPath}/`;
+  res.json({
+    ok: true,
+    currentVersion,
+    targetVersion,
+    updateAvailable: versionGt(targetVersion, currentVersion),
+    autoUpdateEnabled: cfg.autoUpdateEnabled === true,
+    panel: { host: panelHost, port: cfg.panelPort, path: cfg.panelPath, url: panelUrl }
+  });
+});
+
+app.post('/api/update/check', requireAuth, (req, res) => {
+  try {
+    const output = runUpdateScript(['--check-update']);
+    audit('update:check', {}, req.session.username);
+    res.json({ ok: true, output });
+  } catch (e) {
+    res.status(500).json({ error: e.stdout?.toString() || e.stderr?.toString() || e.message });
+  }
+});
+
+app.post('/api/update/apply', requireAuth, (req, res) => {
+  try {
+    const output = runUpdateScript(['--force', '-y']);
+    audit('update:apply', {}, req.session.username);
+    res.json({ ok: true, output });
+  } catch (e) {
+    res.status(500).json({ error: e.stdout?.toString() || e.stderr?.toString() || e.message });
+  }
+});
+
+app.post('/api/update/auto', requireAuth, (req, res) => {
+  const enabled = req.body?.enabled === true || req.body?.enabled === 'true';
+  cfg.autoUpdateEnabled = enabled;
+  saveConfig();
+  try { syncAutoUpdateCron(enabled); } catch (e) { return res.status(500).json({ error: e.message }); }
+  audit('update:auto_toggle', { enabled }, req.session.username);
+  res.json({ ok: true, autoUpdateEnabled: enabled });
 });
 
 // ── Validation helpers ────────────────────────────────────────────────────────
@@ -985,6 +1268,7 @@ app.post('/api/users', requireAuth, (req, res) => {
 
   // Bug 6: rebuild Caddyfile + reload Caddy; rebuild mita state; report status
   const svcStatus = applyAllConfigs();
+  audit('user:create', { id: user.id, username: user.username, protocols: validation.protocols }, req.session.username);
 
   const { passHash, password: _p, ...safe } = user;
   res.status(201).json({ ok: true, ...parseUserRow(safe), ...svcStatus });
@@ -1028,6 +1312,7 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
   upsertUser(updated);
 
   const svcStatus = applyAllConfigs();
+  audit('user:update', { id: updated.id, username: updated.username, protocols: validation.protocols || updated.protocols }, req.session.username);
 
   const { passHash, password: _p, ...safe } = updated;
   res.json({ ok: true, ...parseUserRow(safe), ...svcStatus });
@@ -1038,6 +1323,7 @@ app.delete('/api/users/:id', requireAuth, (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found' });
   deleteUser(req.params.id);
   const svcStatus = applyAllConfigs();
+  audit('user:delete', { id: user.id, username: user.username }, req.session.username);
   res.json({ ok: true, ...svcStatus });
 });
 
@@ -1056,13 +1342,14 @@ app.post('/api/settings/naive-port', requireAuth, (req, res) => {
     restartCaddy();
     // Bug 52: confirm the service is actually running after restart
     let active = false;
-    try { execSync('systemctl is-active caddy-naive', { timeout: 8000 }); active = true; } catch {}
+    try { execFileSync('systemctl', ['is-active', 'caddy-naive'], { timeout: 8000 }); active = true; } catch {}
     if (!active) {
       return res.status(500).json({
         ok: false,
         error: 'caddy-naive failed to start after port change — run: journalctl -u caddy-naive -n 30'
       });
     }
+    audit('settings:naive_port', { port: p }, req.session.username);
     res.json({ ok: true, message: `NaiveProxy port changed to ${p}. Clients must download new configs.` });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1087,6 +1374,7 @@ app.post('/api/settings/mieru-ports', requireAuth, (req, res) => {
 
   try {
     const ok = restartMieru();
+    audit('settings:mieru_ports', { start: s, end: e, ok }, req.session.username);
     res.json({ ok, message: `Mieru ports changed to ${s}–${e}. Service restarted. Clients must download new configs.` });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1105,6 +1393,7 @@ app.post('/api/settings/traffic-pattern', requireAuth, (req, res) => {
   cfg.trafficPattern = pattern; saveConfig();
   try {
     const ok = applyMitaConfig();
+    audit('settings:traffic_pattern', { pattern, mtu: cfg.mtu, ok }, req.session.username);
     res.json({ ok, pattern, mtu: cfg.mtu });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1124,6 +1413,7 @@ app.post('/api/settings/udp-toggle', requireAuth, (req, res) => {
   } catch {}
   try {
     const ok = restartMieru();
+    audit('settings:udp_toggle', { enabled: enable, ok }, req.session.username);
     res.json({ ok, udpEnabled: enable,
       message: `UDP ${enable ? 'enabled' : 'disabled'}. Mieru restarted.` });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1136,6 +1426,7 @@ app.post('/api/settings/language', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Supported languages: ru, en' });
   cfg.language = language;
   saveConfig();
+  audit('settings:language', { language }, req.session.username);
   res.json({ ok: true, language });
 });
 
@@ -1156,6 +1447,7 @@ app.post('/api/settings/probe-secret', requireAuth, (req, res) => {
     const content = buildCaddyfile(cfg, getAllUsers());
     writeCaddyfileAtomic(content);
     const ok = reloadCaddy();
+    audit('settings:probe_secret', { hasSecret: true, mode: cfg.probeMode, ok }, req.session.username);
     res.json({ ok, message: 'Probe secret updated. Caddy reloaded.' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1191,6 +1483,7 @@ app.post('/api/settings/probe-mode', requireAuth, (req, res) => {
     const content = buildCaddyfile(cfg, getAllUsers());
     writeCaddyfileAtomic(content);
     const ok = reloadCaddy();
+    audit('settings:probe_mode', { mode, hasSecret: !!cfg.probeSecret, ok }, req.session.username);
     res.json({ ok, probeMode: mode, message: `probe_resistance mode set to '${mode}'. Caddy reloaded.` });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1302,8 +1595,9 @@ app.post('/api/settings/cascade', requireAuth, (req, res) => {
     // Entry mita stays a plain server in Variant B — just re-apply its config.
     const mitaOk = applyMitaConfig();
 
-    res.json({
-      ok: caddyOk && cascadeOk,
+    const ok = caddyOk && cascadeOk && mitaOk;
+    res.status(ok ? 200 : 500).json({
+      ok,
       caddyOk, mitaOk, cascadeOk,
       // Bug 91: surface the real caddy-naive error to the UI on failure.
       caddyError: caddyOk ? '' : (caddyRes.error || ''),
@@ -1314,6 +1608,14 @@ app.post('/api/settings/cascade', requireAuth, (req, res) => {
             : 'Cascade enabled for Naive only (no Mieru exit configured).')
         : 'Cascade disabled. Relay torn down.'
     });
+    audit('settings:cascade', {
+      enabled,
+      naiveUpstream: !!cfg.cascadeNaiveUpstream,
+      mieruExit: !!hasMieruExit,
+      caddyOk,
+      mitaOk,
+      cascadeOk
+    }, req.session.username);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1489,12 +1791,12 @@ app.get('/api/status', requireAuth, async (req, res) => {
     const [cpu, mem, disk, osInfo] = await Promise.all([
       si.currentLoad(), si.mem(), si.fsSize(), si.osInfo()
     ]);
-    const exec_ = cmd => { try { return execSync(cmd, { timeout: 3000 }).toString().trim(); } catch { return ''; } };
+    const exec_ = (cmd, args) => { try { return execFileSync(cmd, args, { timeout: 3000 }).toString().trim(); } catch { return ''; } };
 
     // v1.2.3: check caddy-naive service (not legacy naive)
-    const caddyActive  = exec_('systemctl is-active caddy-naive') === 'active';
-    const caddyVersion = exec_(`${resolvedCaddyBin} version 2>/dev/null | head -1`) ||
-                         exec_(`${resolvedCaddyBin} --version 2>/dev/null | head -1`);
+    const caddyActive  = exec_('systemctl', ['is-active', 'caddy-naive']) === 'active';
+    const caddyVersion = exec_(resolvedCaddyBin, ['version']) ||
+                         exec_(resolvedCaddyBin, ['--version']);
 
     res.json({
       services: {
@@ -1503,9 +1805,9 @@ app.get('/api/status', requireAuth, async (req, res) => {
           version: caddyVersion
         },
         mieru: {
-          active:  exec_('systemctl is-active mita') === 'active',
-          version: exec_('mita version 2>/dev/null | head -1')
-        },
+        active:  exec_('systemctl', ['is-active', 'mita']) === 'active',
+        version: exec_('mita', ['version'])
+      },
         panel: { active: true }
       },
       system: {
@@ -1518,7 +1820,7 @@ app.get('/api/status', requireAuth, async (req, res) => {
         os:   osInfo.distro + ' ' + osInfo.release,
         arch: osInfo.arch
       },
-      panel:    { userCount: getAllUsers().length, version: cfg.version || '1.2.5' },
+      panel:    { userCount: getAllUsers().length, version: cfg.version || '1.2.6' },
       domain:   cfg.domain,
       serverIp: cfg.serverIp,
       language: cfg.language || 'ru'
@@ -1528,11 +1830,11 @@ app.get('/api/status', requireAuth, async (req, res) => {
 
 // User traffic stats
 app.get('/api/stats/users', requireAuth, (req, res) => {
-  const exec_ = cmd => { try { return execSync(cmd, { timeout: 8000 }).toString(); } catch { return ''; } };
+  const exec_ = (cmd, args) => { try { return execFileSync(cmd, args, { timeout: 8000 }).toString(); } catch { return ''; } };
   // Bug 78: the real mieru server command is `mita get users` (NOT the
   //   non-existent `mita describe users`, which always returned '' → traffic 0).
   //   Output is a table: User  LastActive  1DayDownload  1DayUpload  30DaysDownload  30DaysUpload
-  const raw   = exec_('mita get users 2>/dev/null');
+  const raw   = exec_('mita', ['get', 'users']);
   const live  = parseMitaUsers(raw);
   const users = getAllUsers().map(u => {
     const s = live.find(x => x.username === u.username) || {};
@@ -1607,38 +1909,58 @@ function toMB(v, unit) {
 app.get('/api/logs/:service', requireAuth, (req, res) => {
   const { service } = req.params;
   const lines = Math.min(parseInt(req.query.lines || '100', 10), 1000);
-  let cmd;
-  switch (service) {
-    // v1.2.3: caddy-naive logs (supports legacy 'naive' and 'caddy' aliases)
-    case 'naive':
-    case 'caddy':
-      cmd = `journalctl -u caddy-naive -n ${lines} --no-pager 2>/dev/null || tail -n ${lines} ${LOG_CADDY} 2>/dev/null`;
-      break;
-    case 'mieru': cmd = `journalctl -u mita -n ${lines} --no-pager 2>/dev/null || mita describe log 2>/dev/null`; break;
-    case 'panel': cmd = `tail -n ${lines} ${LOG_PANEL} 2>/dev/null`; break;
-    default: return res.status(400).json({ error: 'Unknown service' });
+  try {
+    let logs = '';
+    switch (service) {
+      // v1.2.3: caddy-naive logs (supports legacy 'naive' and 'caddy' aliases)
+      case 'naive':
+      case 'caddy':
+        try {
+          logs = execFileSync('journalctl', ['-u', 'caddy-naive', '-n', String(lines), '--no-pager'], { timeout: 6000 }).toString();
+        } catch {
+          logs = fs.existsSync(LOG_CADDY)
+            ? execFileSync('tail', ['-n', String(lines), LOG_CADDY], { timeout: 6000 }).toString()
+            : '';
+        }
+        break;
+      case 'mieru':
+        try {
+          logs = execFileSync('journalctl', ['-u', 'mita', '-n', String(lines), '--no-pager'], { timeout: 6000 }).toString();
+        } catch {
+          logs = execFileSync('mita', ['describe', 'log'], { timeout: 6000 }).toString();
+        }
+        break;
+      case 'panel':
+        logs = fs.existsSync(LOG_PANEL)
+          ? execFileSync('tail', ['-n', String(lines), LOG_PANEL], { timeout: 6000 }).toString()
+          : '';
+        break;
+      default:
+        return res.status(400).json({ error: 'Unknown service' });
+    }
+    res.json({ logs: logs || '(no logs available)' });
+  } catch {
+    res.json({ logs: '(no logs available)' });
   }
-  try { res.json({ logs: execSync(cmd, { timeout: 6000 }).toString() }); }
-  catch { res.json({ logs: '(no logs available)' }); }
 });
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
 app.get('/api/diagnostics', requireAuth, async (_req, res) => {
-  const exec_ = cmd => { try { return execSync(cmd, { timeout: 4000 }).toString().trim(); } catch { return ''; } };
+  const exec_ = (cmd, args, timeout = 4000) => {
+    try { return execFileSync(cmd, args, { timeout }).toString().trim(); } catch { return ''; }
+  };
 
   const chkPort = p => {
     try {
-      return parseInt(
-        execSync(`ss -tlnup sport = :${p} 2>/dev/null | grep -c :${p}`, { timeout: 3000 }).toString().trim(),
-        10) > 0;
+      return execFileSync('ss', ['-tlnup'], { timeout: 3000 }).toString().includes(`:${p}`);
     } catch { return false; }
   };
 
   // v1.2.3: caddy-naive version check (replaces naive --version)
   let caddyVersionOk = false, caddyVersionStr = '';
   try {
-    caddyVersionStr = execSync(`${resolvedCaddyBin} version 2>&1`, { timeout: 6000 }).toString().trim() ||
-                     execSync(`${resolvedCaddyBin} --version 2>&1`, { timeout: 6000 }).toString().trim();
+    caddyVersionStr = execFileSync(resolvedCaddyBin, ['version'], { timeout: 6000 }).toString().trim() ||
+                     execFileSync(resolvedCaddyBin, ['--version'], { timeout: 6000 }).toString().trim();
     caddyVersionOk  = caddyVersionStr.length > 0;
   } catch (e) { caddyVersionStr = e.message; }
 
@@ -1665,9 +1987,9 @@ app.get('/api/diagnostics', requireAuth, async (_req, res) => {
       // Bug 23: directive is now "basic_auth" (underscore), not "basicauth"
       return (content.match(/^\s*basic_auth\s+\S+\s+\S+/gm) || []).length;
     })(),
-    mitaStatus:   exec_('mita status 2>/dev/null'),
-    mitaConfig:   exec_('mita describe config 2>/dev/null'),
-    timeSynced:   exec_('timedatectl status 2>/dev/null').includes('synchronized: yes'),
+    mitaStatus:   exec_('mita', ['status']),
+    mitaConfig:   exec_('mita', ['describe', 'config']),
+    timeSynced:   exec_('timedatectl', ['status']).includes('synchronized: yes'),
     mitaStateFile: resolvedMitaFile,
     probeSecretSet: !!(cfg.probeSecret),
     probeMode: (cfg.probeMode || (cfg.probeSecret ? 'secret' : 'bare'))
@@ -1675,6 +1997,17 @@ app.get('/api/diagnostics', requireAuth, async (_req, res) => {
 });
 
 // ── Service control ───────────────────────────────────────────────────────────
+app.get('/api/audit', requireAuth, (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10) || 100, 1), 500);
+  const rows = db
+    ? db.prepare('SELECT id, ts, actor, action, details FROM audit_log ORDER BY id DESC LIMIT ?').all(limit).map(row => ({
+        ...row,
+        details: (() => { try { return JSON.parse(row.details || '{}'); } catch { return {}; } })()
+      }))
+    : [];
+  res.json({ rows, limit });
+});
+
 app.post('/api/service/:name/:action', requireAuth, (req, res) => {
   const { name, action } = req.params;
   // Map legacy 'naive' name to 'caddy-naive'; keep 'mita' as-is
@@ -1685,7 +2018,8 @@ app.post('/api/service/:name/:action', requireAuth, (req, res) => {
   if (!['start','stop','restart','reload'].includes(action))
     return res.status(400).json({ error: 'Unknown action' });
   try {
-    execSync(`systemctl ${action} ${svcName} 2>&1`, { timeout: 15000 });
+    execFileSync('systemctl', [action, svcName], { timeout: 15000 });
+    audit('service:control', { service: svcName, action }, req.session.username);
     res.json({ ok: true, service: svcName, action });
   } catch (e) { res.status(500).json({ error: e.stdout?.toString() || e.message }); }
 });
@@ -1693,7 +2027,7 @@ app.post('/api/service/:name/:action', requireAuth, (req, res) => {
 // ── WebSocket — real-time metrics ─────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: '/ws' });
 wss.on('connection', ws => {
-  const exec_ = cmd => { try { return execSync(cmd, { timeout: 2000 }).toString().trim(); } catch { return ''; } };
+  const exec_ = (cmd, args) => { try { return execFileSync(cmd, args, { timeout: 2000 }).toString().trim(); } catch { return ''; } };
   let iv;
   const push = async () => {
     if (ws.readyState !== ws.OPEN) { clearInterval(iv); return; }
@@ -1706,8 +2040,8 @@ wss.on('connection', ws => {
         ramUsedMB:  Math.round((mem.total - mem.available) / 1048576),
         ramTotalMB: Math.round(mem.total / 1048576),
         // v1.2.3: check caddy-naive service
-        naive:      exec_('systemctl is-active caddy-naive') === 'active',
-        mieru:      exec_('systemctl is-active mita')        === 'active'
+        naive:      exec_('systemctl', ['is-active', 'caddy-naive']) === 'active',
+        mieru:      exec_('systemctl', ['is-active', 'mita']) === 'active'
       }));
     } catch {}
   };
@@ -1744,7 +2078,7 @@ cron.schedule('* * * * *', () => {
   try {
     // Bug 78: use `mita get users` (the real command); `mita describe users`
     //   does not exist and always produced empty output.
-    const raw  = execSync('mita get users 2>/dev/null', { timeout: 5000 }).toString();
+    const raw  = execFileSync('mita', ['get', 'users'], { timeout: 5000 }).toString();
     const live = parseMitaUsers(raw);
     if (!live.length) return;
     const ts   = new Date().toISOString();
@@ -1774,7 +2108,7 @@ server.listen(PORT, HOST, () => {
     '  ██║  ██║ ██║ ██╔╝ ██╗ ██╔╝ ██╗ ██╔╝ ██╗',
     '  ╚═╝  ╚═╝ ╚═╝ ╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚═╝  ╚═╝',
     '',
-    `  Panel Naive + Mieru v${cfg.version || '1.2.5'} by RIXXX  (Caddy-forwardproxy-naive)`,
+    `  Panel Naive + Mieru v${cfg.version || '1.2.6'} by RIXXX  (Caddy-forwardproxy-naive)`,
     `  http://${HOST}:${PORT}/`,
     HOST === '127.0.0.1' ? `  ⚠  SSH-only: ssh -L 3000:127.0.0.1:3000 root@<server>` : '',
     ''

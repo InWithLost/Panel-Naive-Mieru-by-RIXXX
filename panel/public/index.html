@@ -118,6 +118,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
         <span data-i18n="nav.logs">Logs</span>
       </a>
+      <a href="#" class="nav-item" data-page="audit">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16"/><path d="M4 12h10"/><path d="M4 17h16"/><path d="M17 7v10"/></svg>
+        <span data-i18n="nav.audit">Audit</span>
+      </a>
       <a href="#" class="nav-item" data-page="diagnostics">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         <span data-i18n="nav.diagnostics">Diagnostics</span>
@@ -578,6 +582,34 @@
         </div>
 
         <div class="card">
+          <div class="card-header" data-i18n="settings.updateTitle">Updates</div>
+          <div class="card-body">
+            <p class="card-desc" data-i18n="settings.updateDesc">Careful update flow for the panel, Naive, and Mieru. Check first, apply manually, or leave auto-update enabled.</p>
+            <div class="info-list" style="margin-bottom:12px">
+              <div class="info-row"><span data-i18n="settings.panelUrl">Panel URL</span><span id="update-panel-url">—</span></div>
+              <div class="info-row"><span data-i18n="settings.panelHost">Host</span><span id="update-panel-host">—</span></div>
+              <div class="info-row"><span data-i18n="settings.panelPort">Port</span><span id="update-panel-port">—</span></div>
+              <div class="info-row"><span data-i18n="settings.panelPath">Path</span><span id="update-panel-path">—</span></div>
+              <div class="info-row"><span data-i18n="settings.currentVersion">Current version</span><span id="update-current-version">—</span></div>
+              <div class="info-row"><span data-i18n="settings.targetVersion">Target version</span><span id="update-target-version">—</span></div>
+            </div>
+            <label class="checkbox" style="margin-bottom:12px">
+              <input type="checkbox" id="s-auto-update-enabled" />
+              <span data-i18n="settings.autoUpdateEnable">Enable auto-update</span>
+            </label>
+            <div class="alert alert-warning">
+              <strong>⚠</strong> <span data-i18n="settings.autoUpdateNote">Auto-update runs carefully on the server and skips itself when no new version is available.</span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-secondary mt-2" data-action="check-update" data-i18n="settings.checkUpdate">Check update</button>
+              <button class="btn btn-primary mt-2" data-action="apply-update" data-i18n="settings.applyUpdate">Apply update</button>
+            </div>
+            <pre id="update-status" class="hidden" style="margin-top:12px;padding:10px;background:var(--bg-2,#111);border-radius:8px;overflow:auto;font-size:12px;white-space:pre-wrap"></pre>
+            <div id="update-msg" class="msg-inline hidden"></div>
+          </div>
+        </div>
+
+        <div class="card">
           <div class="card-header" data-i18n="settings.passwordTitle">Panel Password</div>
           <div class="card-body">
             <div class="form-group">
@@ -707,6 +739,31 @@
     </section>
 
     <!-- ── DIAGNOSTICS ───────────────────────────────────────── -->
+    <section id="page-audit" class="content-page">
+      <div class="page-header">
+        <h3 data-i18n="audit.title">Audit</h3>
+        <button class="btn btn-primary btn-sm" data-action="refresh-audit" data-i18n="audit.refresh">Refresh</button>
+      </div>
+      <div class="card">
+        <div class="card-header" data-i18n="audit.recent">Recent Actions</div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th data-i18n="audit.time">Time</th>
+                <th data-i18n="audit.actor">Actor</th>
+                <th data-i18n="audit.action">Action</th>
+                <th data-i18n="audit.details">Details</th>
+              </tr>
+            </thead>
+            <tbody id="audit-tbody">
+              <tr><td colspan="4" class="table-empty" data-i18n="audit.loading">Loading audit log…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <section id="page-diagnostics" class="content-page">
       <div class="page-header">
         <h3 data-i18n="diagnostics.title">Diagnostics</h3>

@@ -869,7 +869,8 @@ setup_ufw() {
   # Bug 7: single-port safe helper
   _ufw_mieru_rule "$MIERU_PORT_START" "$MIERU_PORT_END" tcp "Mieru TCP"
   _ufw_mieru_rule "$MIERU_PORT_START" "$MIERU_PORT_END" udp "Mieru UDP"
-  [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]] && ufw allow 8080/tcp comment "Panel Web UI"
+  local panel_port; panel_port=$(jq -r '.panelPort // 3000' "$PANEL_CONFIG" 2>/dev/null || echo 3000)
+  [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]] && ufw allow "${panel_port}/tcp" comment "Panel Web UI"
   ufw --force enable || true
   log_info "$(t 'Правила UFW применены ✓' 'UFW rules applied ✓')"
 }
@@ -900,6 +901,8 @@ install_panel() {
     cp -r /tmp/panel-src/panel/* "$PANEL_DIR/"
     rm -rf /tmp/panel-src
   fi
+  [[ -f "$script_dir/update.sh" ]] && cp "$script_dir/update.sh" "$PANEL_DIR/update.sh" 2>/dev/null || true
+  [[ -f "$script_dir/install.sh" ]] && cp "$script_dir/install.sh" "$PANEL_DIR/install.sh" 2>/dev/null || true
   ( cd "$PANEL_DIR" && npm install --production --silent )
   log_info "$(t 'npm зависимости установлены ✓' 'npm dependencies installed ✓')"
 }
@@ -910,6 +913,11 @@ write_config_json() {
   mkdir -p /etc/rixxx-panel "$(dirname "$DB_PATH")"
   local server_ip
   server_ip=$(curl -4 -fsSL https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+  local panel_port panel_path
+  panel_port=$(python3 -c 'import random; print(random.randint(20000, 59999))' 2>/dev/null || echo 3000)
+  panel_path=$(python3 -c 'import secrets; print("/admin-" + secrets.token_urlsafe(12).replace("-","").replace("_",""))' 2>/dev/null || echo /admin)
+  PANEL_PORT="$panel_port"
+  PANEL_PATH="$panel_path"
 
   # Generate bcrypt hash via Node (rounds=12).
   # Bug 73 (P0): the password is passed via the RIXXX_ADMIN_PASS env var, NOT
@@ -944,9 +952,11 @@ data = {
     "naivePort":       $NAIVE_PORT,
     "mieruPortStart":  $MIERU_PORT_START,
     "mieruPortEnd":    $MIERU_PORT_END,
-    "panelPort":       3000,
+    "panelPort":       $panel_port,
     "panelHost":       "127.0.0.1",
+    "panelPath":       "$panel_path",
     "exposePanel":     "$EXPOSE_PANEL".upper() in ("Y","Д"),
+    "autoUpdateEnabled": False,
     "useUfw":          "$USE_UFW".upper() in ("Y","Д"),
     "dbPath":          "$DB_PATH",
     "caddyBin":        "$CADDY_BIN",
@@ -982,6 +992,20 @@ mieru_version=${MIERU_VERSION:-unknown}
 installed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 VEREOF
   log_info "$(t "Версия записана → $VERSION_FILE ✓" "Version file written → $VERSION_FILE ✓")"
+}
+
+# ── Auto-update cron ──────────────────────────────────────────────────────────
+write_auto_update_cron() {
+  log_step "$(t 'Запись cron для автообновления' 'Writing auto-update cron')"
+  mkdir -p /etc/cron.d
+  cat > /etc/cron.d/rixxx-panel-update <<CRONEOF
+# Panel Naive + Mieru auto-update
+# The script checks /etc/rixxx-panel/config.json and exits immediately when
+# autoUpdateEnabled=false. Enable/disable from the admin panel.
+17 3 * * * root cd "$PANEL_DIR" && /bin/bash "$PANEL_DIR/update.sh" --auto -y >> /var/log/rixxx-panel-update.log 2>&1
+CRONEOF
+  chmod 644 /etc/cron.d/rixxx-panel-update
+  log_info "$(t 'Cron autoобновления записан ✓' 'Auto-update cron written ✓')"
 }
 
 # ── Start services ────────────────────────────────────────────────────────────
@@ -1116,13 +1140,16 @@ except Exception:
   cd "$PANEL_DIR"
   local panel_host="127.0.0.1"
   [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]] && panel_host="0.0.0.0"
+  local panel_port panel_path
+  panel_port=$(jq -r '.panelPort // 3000' "$PANEL_CONFIG")
+  panel_path=$(jq -r '.panelPath // "/admin"' "$PANEL_CONFIG")
   pm2 delete panel-naive-mieru 2>/dev/null || true
-  PANEL_HOST="$panel_host" PANEL_PORT=3000 \
+  PANEL_HOST="$panel_host" PANEL_PORT="$panel_port" PANEL_PATH="$panel_path" \
     pm2 start server/index.js \
       --name panel-naive-mieru \
       --log /var/log/panel-naive-mieru.log \
       --time 2>/dev/null || \
-  NODE_ENV=production PANEL_HOST="$panel_host" PANEL_PORT=3000 \
+  NODE_ENV=production PANEL_HOST="$panel_host" PANEL_PORT="$panel_port" PANEL_PATH="$panel_path" \
     pm2 start server/index.js --name panel-naive-mieru --time
   pm2 save
   pm2 startup systemd -u root --hp /root 2>/dev/null | tail -1 | bash 2>/dev/null || true
@@ -1136,7 +1163,7 @@ smoke_test_configs() {
   local test_user="smoke_test_user"
   local test_pass="smoke_pass_123"
   local test_email="smoke@test.local"
-  local panel_url="http://127.0.0.1:3000"
+  local panel_url="http://127.0.0.1:${PANEL_PORT}${PANEL_PATH}"
   local pass=0 fail=0
   local cookie_file; cookie_file=$(mktemp)
 
@@ -1251,7 +1278,7 @@ smoke_test() {
        systemctl is-enabled mita"
 
   # Panel
-  chk "Panel responds :3000"         "curl -sf http://127.0.0.1:3000/ -o /dev/null"
+  chk "Panel responds"               "curl -sf http://127.0.0.1:${PANEL_PORT}${PANEL_PATH}/ -o /dev/null"
   chk "config.json present"          "[[ -f $PANEL_CONFIG ]]"
   chk "version file present"         "[[ -f $VERSION_FILE ]]"
 
@@ -1288,6 +1315,9 @@ print_banner() {
   local server_ip
   server_ip=$(python3 -c "import json; print(json.load(open('$PANEL_CONFIG'))['serverIp'])" 2>/dev/null \
               || hostname -I | awk '{print $1}')
+  local panel_port panel_path
+  panel_port=$(jq -r '.panelPort // 3000' "$PANEL_CONFIG" 2>/dev/null || echo 3000)
+  panel_path=$(jq -r '.panelPath // "/admin"' "$PANEL_CONFIG" 2>/dev/null || echo /admin)
   echo ""
   echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
   if $LANG_RU; then
@@ -1306,10 +1336,10 @@ print_banner() {
   echo ""
   echo -e "  ${BOLD}$(t 'Доступ к панели' 'Panel access'):${NC}"
   if [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]]; then
-    echo -e "    $(t 'Публичный URL' 'Public URL'):  ${CYAN}http://$server_ip:8080/${NC}"
+    echo -e "    $(t 'Публичный URL' 'Public URL'):  ${CYAN}http://$server_ip:${panel_port}${panel_path}/${NC}"
   else
-    echo -e "    SSH: ${CYAN}ssh -L 3000:127.0.0.1:3000 root@$server_ip${NC}"
-    echo -e "    $(t 'Затем откройте' 'Then open'):  ${CYAN}http://localhost:3000/${NC}"
+    echo -e "    SSH: ${CYAN}ssh -L ${panel_port}:127.0.0.1:${panel_port} root@$server_ip${NC}"
+    echo -e "    $(t 'Затем откройте' 'Then open'):  ${CYAN}http://localhost:${panel_port}${panel_path}/${NC}"
   fi
   echo ""
   echo -e "  ${BOLD}$(t 'Данные администратора' 'Admin credentials'):${NC}"
@@ -1372,6 +1402,7 @@ main() {
   install_panel
   write_config_json
   write_version
+  write_auto_update_cron
   tune_network      # BBR + UDP buffers (uses panel/scripts/sysctl_tune.sh)
   maybe_ufw
   start_services

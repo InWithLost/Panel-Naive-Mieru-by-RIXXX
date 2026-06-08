@@ -2,7 +2,7 @@
  * Panel Naive + Mieru — Frontend Application v1.2.6
  * Bug 1 fix: ALL inline event handlers removed; wired via delegated addEventListener
  * Bug 10 fix: 401 auto-redirect to login; toast on every API error
- * v1.2.5: probe-secret setting, disabled-button+spinner on all submit handlers,
+ * v1.2.6: probe-secret setting, disabled-button+spinner on all submit handlers,
  *         dashboard shows caddy-naive version label, config version bump
  * v1.2.6: cascade/relay settings (Naive upstream + Mieru egress SOCKS5)
  */
@@ -14,10 +14,19 @@
 
 const SUPPORTED_LANGS = ['ru', 'en'];
 let locale = {};
+const PANEL_BASE_PATH = (() => {
+  const p = (window.location?.pathname || '/').replace(/\/+$/, '');
+  return p === '' ? '' : p;
+})();
+
+function panelPath(path) {
+  const clean = path.startsWith('/') ? path : `/${path}`;
+  return `${PANEL_BASE_PATH}${clean}`;
+}
 
 async function loadLocale(lang) {
   try {
-    const res = await fetch(`/locales/${lang}.json`);
+    const res = await fetch(panelPath(`/locales/${lang}.json`));
     if (!res.ok) throw new Error('locale not found');
     locale = await res.json();
   } catch {
@@ -126,6 +135,7 @@ function buildTitles() {
     settings:    t('nav.settings'),
     monitoring:  t('nav.monitoring'),
     logs:        t('nav.logs'),
+    audit:       t('nav.audit'),
     diagnostics: t('nav.diagnostics'),
   };
 }
@@ -137,6 +147,7 @@ function buildTitles() {
 const state = {
   authenticated: false,
   username: '',
+  csrfToken: '',
   config: {},
   users: [],
   currentPage: 'dashboard',
@@ -179,12 +190,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // ── Check existing session ────────────────────────────────────
-  fetch('/api/me')
+  fetch(panelPath('/api/me'))
     .then(r => r.ok ? r.json() : null)
     .then(data => {
       if (data && data.authenticated) {
         state.authenticated = true;
         state.username = data.username;
+        state.csrfToken = data.csrfToken || state.csrfToken || '';
         enterApp();
       }
     })
@@ -238,6 +250,8 @@ function handleDelegatedClick(e) {
     case 'apply-probe-mode':     applyProbeMode(); break;
     case 'change-cascade':       changeCascade(); break;
     case 'cascade-status':       checkCascadeStatus(); break;
+    case 'check-update':         checkUpdate(); break;
+    case 'apply-update':         applyUpdate(); break;
 
     // ── Monitoring
     case 'refresh-stats':    refreshStats(); break;
@@ -245,6 +259,7 @@ function handleDelegatedClick(e) {
     // ── Logs
     case 'load-logs':        loadLogs(btn.dataset.logSvc); break;
     case 'refresh-logs':     loadLogs(currentLogService); break;
+    case 'refresh-audit':    loadAudit(); break;
 
     // ── Diagnostics
     case 'run-diagnostics':  runDiagnostics(); break;
@@ -266,6 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('btn-logout')    ?.setAttribute('data-action', 'logout');
   document.getElementById('menu-toggle')   ?.setAttribute('data-action', 'toggle-sidebar');
+  document.getElementById('s-auto-update-enabled')?.addEventListener('change', changeAutoUpdate);
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -287,6 +303,7 @@ async function handleLogin(e) {
     const res = await api('POST', '/api/login', { username, password });
     state.authenticated = true;
     state.username = res.username;
+    state.csrfToken = res.csrfToken || '';
     enterApp();
   } catch (ex) {
     err.textContent = ex.message || t('login.invalidCreds');
@@ -312,8 +329,9 @@ function enterApp() {
 }
 
 async function logout() {
-  await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+  await api('POST', '/api/logout').catch(() => {});
   state.authenticated = false;
+  state.csrfToken = '';
   if (state.ws) state.ws.close();
   document.getElementById('app').classList.add('hidden');
   document.getElementById('page-login').classList.add('active');
@@ -343,6 +361,7 @@ function navigateTo(page) {
     case 'settings':    loadSettings();    break;
     case 'monitoring':  loadMonitoring();  break;
     case 'logs':        loadLogs(currentLogService); break;
+    case 'audit':       loadAudit();       break;
     case 'diagnostics': runDiagnostics();  break;
   }
 
@@ -375,7 +394,7 @@ function toggleSidebar() {
 async function loadConfig() {
   try {
     state.config = await api('GET', '/api/config');
-    document.getElementById('topbar-version').textContent = `v${state.config.version || '1.2.4'}`;
+    document.getElementById('topbar-version').textContent = `v${state.config.version || '1.2.6'}`;
   } catch {}
 }
 
@@ -421,7 +440,7 @@ async function loadDashboard() {
       [t('dashboard.mieruVersion'), status.services.mieru.version || '—'],
     ]);
 
-    document.getElementById('about-version').textContent = `v${status.panel.version || '1.2.4'}`;
+    document.getElementById('about-version').textContent = `v${status.panel.version || '1.2.6'}`;
   } catch (err) {
     console.error('Dashboard error:', err);
   }
@@ -544,7 +563,7 @@ async function saveUser() {
   const body = { email, username, expiry, protocols, quotaMB };
   if (password) body.password = password;
 
-  // v1.2.5: disabled-button + spinner pattern
+  // v1.2.6: disabled-button + spinner pattern
   const saveBtn = el('btn-save-user');
   setBtnBusy(saveBtn, true);
 
@@ -733,7 +752,7 @@ async function loadSettings() {
     if (udpBox) udpBox.checked = cfg.udpEnabled === true;
     const langSel = el('s-language-select');
     if (langSel) langSel.value = cfg.language || currentLang || 'ru';
-    // v1.2.5: probe secret (masked)
+    // v1.2.6: probe secret (masked)
     const probeEl = el('s-probe-secret');
     if (probeEl) probeEl.placeholder = cfg.probeSecret ? '••••••••' : (t('settings.probeSecretPlaceholder') || 'Enter probe secret');
     // Bug 81: probe_resistance mode selector + secret-input visibility
@@ -766,8 +785,89 @@ async function loadSettings() {
         ? '••••••• (set — leave blank to keep)'
         : (cascadeMieruPassEl.placeholder || 'password');
     }
-    document.getElementById('about-version').textContent = `v${cfg.version || '1.2.4'}`;
+    document.getElementById('about-version').textContent = `v${cfg.version || '1.2.6'}`;
+    await loadUpdateStatus();
   } catch {}
+}
+
+async function loadUpdateStatus() {
+  try {
+    const st = await api('GET', '/api/update/status');
+    const urlEl = el('update-panel-url');
+    if (urlEl) urlEl.textContent = st.panel?.url || '—';
+    const curEl = el('update-current-version');
+    if (curEl) curEl.textContent = st.currentVersion || '—';
+    const tgtEl = el('update-target-version');
+    if (tgtEl) tgtEl.textContent = st.targetVersion || '—';
+    const autoEl = el('s-auto-update-enabled');
+    if (autoEl) autoEl.checked = st.autoUpdateEnabled === true;
+    state.config = state.config || {};
+    state.config.autoUpdateEnabled = st.autoUpdateEnabled === true;
+    const hostEl = el('update-panel-host');
+    if (hostEl) hostEl.textContent = st.panel?.host || '—';
+    const portEl = el('update-panel-port');
+    if (portEl) portEl.textContent = String(st.panel?.port || '—');
+    const pathEl = el('update-panel-path');
+    if (pathEl) pathEl.textContent = st.panel?.path || '—';
+    const statusEl = el('update-status');
+    if (statusEl) {
+      statusEl.textContent = JSON.stringify(st, null, 2);
+      statusEl.classList.add('hidden');
+    }
+  } catch {}
+}
+
+async function changeAutoUpdate() {
+  const enabled = el('s-auto-update-enabled')?.checked || false;
+  try {
+    const res = await api('POST', '/api/update/auto', { enabled });
+    state.config = state.config || {};
+    state.config.autoUpdateEnabled = res.autoUpdateEnabled === true;
+    toast(enabled ? (t('settings.autoUpdateEnabled') || 'Auto-update enabled') : (t('settings.autoUpdateDisabled') || 'Auto-update disabled'), 'success');
+    showMsg('update-msg', res.autoUpdateEnabled ? (t('settings.autoUpdateEnabled') || 'Auto-update enabled') : (t('settings.autoUpdateDisabled') || 'Auto-update disabled'), true);
+  } catch (err) {
+    showMsg('update-msg', err.message, false);
+    const autoEl = el('s-auto-update-enabled');
+    if (autoEl) autoEl.checked = !enabled;
+  }
+}
+
+async function checkUpdate() {
+  const btn = document.querySelector('[data-action="check-update"]');
+  setBtnBusy(btn, true);
+  try {
+    const res = await api('POST', '/api/update/check', {});
+    showMsg('update-msg', t('settings.updateCheckDone') || 'Update check completed', true);
+    const statusEl = el('update-status');
+    if (statusEl) {
+      statusEl.textContent = res.output || '';
+      statusEl.classList.remove('hidden');
+    }
+  } catch (err) {
+    showMsg('update-msg', err.message, false);
+  } finally {
+    setBtnBusy(btn, false);
+  }
+}
+
+async function applyUpdate() {
+  if (!confirm(t('settings.updateApplyConfirm') || 'Apply panel update now?')) return;
+  const btn = document.querySelector('[data-action="apply-update"]');
+  setBtnBusy(btn, true);
+  try {
+    const res = await api('POST', '/api/update/apply', {});
+    showMsg('update-msg', t('settings.updateApplyDone') || 'Update applied', true);
+    const statusEl = el('update-status');
+    if (statusEl) {
+      statusEl.textContent = res.output || '';
+      statusEl.classList.remove('hidden');
+    }
+    await loadUpdateStatus();
+  } catch (err) {
+    showMsg('update-msg', err.message, false);
+  } finally {
+    setBtnBusy(btn, false);
+  }
 }
 
 async function changeNaivePort() {
@@ -872,7 +972,7 @@ function toggleProbeSecretVisibility() {
   grp.style.display = (sel.value === 'secret') ? '' : 'none';
 }
 
-// v1.2.5 / Bug 81: legacy entry point — delegate to applyProbeMode.
+// v1.2.6 / Bug 81: legacy entry point — delegate to applyProbeMode.
 async function changeProbeSecret() { return applyProbeMode(); }
 
 // Bug 81: probe_resistance mode toggle ('off' | 'bare' | 'secret').
@@ -1095,6 +1195,40 @@ async function loadLogs(service) {
   }
 }
 
+async function loadAudit() {
+  const tbody = el('audit-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="4" class="table-empty">${t('audit.loading') || 'Loading audit log…'}</td></tr>`;
+  try {
+    const data = await api('GET', '/api/audit?limit=100');
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="4" class="table-empty">${t('audit.empty') || 'No audit entries yet'}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(row => {
+      const time = (() => {
+        try {
+          return new Date(row.ts).toLocaleString(currentLang === 'ru' ? 'ru-RU' : 'en-GB');
+        } catch {
+          return String(row.ts || '—');
+        }
+      })();
+      const details = row.details && typeof row.details === 'object'
+        ? JSON.stringify(row.details)
+        : String(row.details || '');
+      return `<tr>
+        <td>${esc(time)}</td>
+        <td>${esc(row.actor || 'system')}</td>
+        <td><span class="badge badge-blue">${esc(row.action || '')}</span></td>
+        <td><pre class="mini-log" style="margin:0;white-space:pre-wrap">${esc(details || '—')}</pre></td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" class="table-empty">${esc(err.message || 'Error')}</td></tr>`;
+  }
+}
+
 // ══════════════════════════════════════════════════════════════
 // DIAGNOSTICS
 // ══════════════════════════════════════════════════════════════
@@ -1124,7 +1258,7 @@ async function runDiagnostics() {
         </div>
       </div>`;
 
-    // v1.2.5: caddy-forwardproxy-naive — show Caddyfile + probe_secret status
+    // v1.2.6: caddy-forwardproxy-naive — show Caddyfile + probe_secret status
     const naiveOk = data.naiveVersionOk && data.naiveConfigExists;
     const caddyfileUsers = data.caddyfileUsers ?? data.htpasswdUsers ?? 0;
     const probeSet = data.probeSecretSet ? '✓ set' : '✗ not set';
@@ -1163,7 +1297,7 @@ async function svcAction(service, action) {
 function connectWebSocket() {
   if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${location.host}/ws`;
+  const wsUrl = `${proto}//${location.host}${panelPath('/ws')}`;
 
   try {
     const ws = new WebSocket(wsUrl);
@@ -1214,9 +1348,12 @@ async function api(method, path, body) {
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
   };
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && state.csrfToken) {
+    opts.headers['X-CSRF-Token'] = state.csrfToken;
+  }
   if (body) opts.body = JSON.stringify(body);
 
-  const res  = await fetch(path, opts);
+  const res  = await fetch(panelPath(path), opts);
 
   // Bug 10: auto-redirect on 401
   if (res.status === 401) {
@@ -1253,7 +1390,7 @@ function redirectToLogin() {
 function el(id) { return document.getElementById(id); }
 
 /**
- * v1.2.5: disabled-button + spinner pattern for all submit handlers.
+ * v1.2.6: disabled-button + spinner pattern for all submit handlers.
  * Prevents double-submit and gives visual feedback during async ops.
  */
 function setBtnBusy(btn, busy) {

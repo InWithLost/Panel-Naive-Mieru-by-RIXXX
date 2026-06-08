@@ -23,7 +23,8 @@
     "settings": "Настройки",
     "monitoring": "Мониторинг",
     "logs": "Логи",
-    "diagnostics": "Диагностика",
+        "audit": "??????",
+"diagnostics": "Диагностика",
     "administrator": "Администратор"
   },
 
@@ -189,6 +190,23 @@
     "languageDesc": "Выберите язык веб-панели. Настройка сохраняется в браузере.",
     "applyLanguage": "Применить",
     "cascadeTitle": "Каскад / Relay",
+    "updateTitle": "Обновления",
+    "updateDesc": "Аккуратное обновление панели, Naive и Mieru. Сначала проверка, потом ручное применение или автообновление.",
+    "panelUrl": "URL панели",
+    "panelHost": "Хост",
+    "panelPort": "Порт",
+    "panelPath": "Путь",
+    "currentVersion": "Текущая версия",
+    "targetVersion": "Целевая версия",
+    "autoUpdateEnable": "Включить автообновление",
+    "autoUpdateNote": "Автообновление работает аккуратно на сервере и ничего не делает, если новая версия не найдена.",
+    "checkUpdate": "Проверить обновление",
+    "applyUpdate": "Применить обновление",
+    "updateCheckDone": "Проверка обновления завершена",
+    "updateApplyConfirm": "Применить обновление панели сейчас?",
+    "updateApplyDone": "Обновление применено",
+    "autoUpdateEnabled": "Автообновление включено",
+    "autoUpdateDisabled": "Автообновление выключено",
     "cascadeDesc": "Настройка relay: трафик идёт через этот сервер (entry) на выходной сервер (exit), а затем в интернет. Mieru использует вариант B (mieru-client + redsocks + iptables) — провайдер видит только этот (entry) сервер.",
     "cascadeEnable": "Включить каскад (relay)",
     "cascadeNaiveUpstreamLabel": "Naive upstream URL",
@@ -249,6 +267,19 @@
     "loading": "Загрузка…",
     "selectLog": "Выберите лог выше…",
     "error": "Ошибка: {{msg}}"
+  },
+
+
+  "audit": {
+    "title": "?????? ????????",
+    "refresh": "????????",
+    "recent": "????????? ????????",
+    "time": "?????",
+    "actor": "???",
+    "action": "????????",
+    "details": "??????",
+    "loading": "???????? ????????",
+    "empty": "??????? ???? ???"
   },
 
   "diagnostics": {

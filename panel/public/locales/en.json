@@ -23,6 +23,7 @@
     "settings": "Server Settings",
     "monitoring": "Monitoring",
     "logs": "Logs",
+    "audit": "Audit",
     "diagnostics": "Diagnostics",
     "administrator": "Administrator"
   },
@@ -189,6 +190,23 @@
     "languageDesc": "Select web-panel language. Choice is saved in browser.",
     "applyLanguage": "Apply",
     "cascadeTitle": "Cascade / Relay",
+    "updateTitle": "Updates",
+    "updateDesc": "Careful update flow for the panel, Naive, and Mieru. Check first, apply manually, or leave auto-update enabled.",
+    "panelUrl": "Panel URL",
+    "panelHost": "Host",
+    "panelPort": "Port",
+    "panelPath": "Path",
+    "currentVersion": "Current version",
+    "targetVersion": "Target version",
+    "autoUpdateEnable": "Enable auto-update",
+    "autoUpdateNote": "Auto-update runs carefully on the server and skips itself when no new version is available.",
+    "checkUpdate": "Check update",
+    "applyUpdate": "Apply update",
+    "updateCheckDone": "Update check completed",
+    "updateApplyConfirm": "Apply panel update now?",
+    "updateApplyDone": "Update applied",
+    "autoUpdateEnabled": "Auto-update enabled",
+    "autoUpdateDisabled": "Auto-update disabled",
     "cascadeDesc": "Relay setup: traffic goes through this server (entry) to the exit server, then to the internet. Mieru uses Variant B (mieru-client + redsocks + iptables) — the provider only sees this (entry) server.",
     "cascadeEnable": "Enable cascade (relay)",
     "cascadeNaiveUpstreamLabel": "Naive upstream URL",
@@ -249,6 +267,18 @@
     "loading": "Loading…",
     "selectLog": "Select a log above…",
     "error": "Error: {{msg}}"
+  },
+
+  "audit": {
+    "title": "Audit",
+    "refresh": "Refresh",
+    "recent": "Recent Actions",
+    "time": "Time",
+    "actor": "Actor",
+    "action": "Action",
+    "details": "Details",
+    "loading": "Loading audit log…",
+    "empty": "No audit entries yet"
   },
 
   "diagnostics": {

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Panel Naive + Mieru by RIXXX — update.sh  v1.2.5
-# Usage: bash update.sh [--dry-run] [--force] [--expose <domain>] [--ssh-only]
-#                       [--status] [--repair] [--help] [-y]
+# Panel Naive + Mieru by RIXXX — update.sh  v1.2.6
+# Usage: bash update.sh [--dry-run] [--force] [--check-update] [--auto]
+#                       [--expose <domain>] [--ssh-only] [--status]
+#                       [--repair] [--help] [-y]
 #
 # v1.2.4: Fixed Caddyfile template (bugs 23-40); uses caddyTemplate.js.
 #   - --repair calls /api/services/rebuild-all to regenerate Caddyfile
 #   - update_caddy_naive() replaces update_naiveproxy()
 #   - rebuild_caddyfile_direct() now uses caddyTemplate.js (Bug 26)
-# v1.2.5: Hotfixes 41-64 — /var/lib/caddy perms, atomic saveConfig(),
+# v1.2.6: Hotfixes 41-64 — /var/lib/caddy perms, atomic saveConfig(),
 #   plaintext-password guard (Bug 44), reloadCaddy() simplified (Bug 50),
 #   mieruPort safe defaults (Bug 51), naive-port active check (Bug 52),
 #   caddy fmt (Bug 60), caddyTemplate indentation (Bug 63), README security
@@ -46,6 +47,7 @@ VERSION_FILE="/etc/rixxx-panel/version"
 BACKUP_DIR="/etc/rixxx-panel/backups"
 DB_PATH="/var/lib/rixxx-panel/db.sqlite"
 MITA_STATE_FILE="/var/lib/rixxx-panel/mita-state.json"
+LOCK_FILE="/var/lock/rixxx-panel-update.lock"
 
 # v1.2.3: Caddy-forwardproxy-naive paths (replaces standalone naive binary)
 CADDY_BIN="/usr/local/bin/caddy-naive"
@@ -68,6 +70,8 @@ FORCE=false
 YES=false
 MODE=""
 EXPOSE_DOMAIN=""
+CHECK_ONLY=false
+AUTO_MODE=false
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 parse_args() {
@@ -76,6 +80,8 @@ parse_args() {
       --dry-run)   DRY_RUN=true ;;
       --force)     FORCE=true ;;
       -y|--yes)    YES=true ;;
+      --check-update) MODE="check-update" ;;
+      --auto)      MODE="auto" ;;
       --expose)    MODE="expose"; EXPOSE_DOMAIN="${2:-}"; shift ;;
       --ssh-only)  MODE="ssh-only" ;;
       --status)    MODE="status" ;;
@@ -109,8 +115,10 @@ OPTIONS:
   --dry-run              Show what would be done without making changes
   --force                Force update even if already on latest version
   -y / --yes             Non-interactive (auto-confirm all prompts)
-  --expose <domain>      Switch panel to public mode on :8080
-  --ssh-only             Switch panel back to SSH-tunnel-only (127.0.0.1:3000)
+  --check-update         Check whether the bundled target version is newer
+  --auto                 Run careful update only when auto-update is enabled
+  --expose <domain>      Switch panel to public mode on its configured port/path
+  --ssh-only             Switch panel back to SSH-tunnel-only (127.0.0.1)
   --status               Print full health report
   --repair               Rebuild Caddyfile + mita config from SQLite DB; restart services
   --help                 Show this help
@@ -151,13 +159,20 @@ load_config() {
   NAIVE_PORT=$(jq -r '.naivePort'       "$PANEL_CONFIG")
   MIERU_START=$(jq -r '.mieruPortStart' "$PANEL_CONFIG")
   MIERU_END=$(jq -r '.mieruPortEnd'     "$PANEL_CONFIG")
+  PANEL_PORT=$(jq -r '.panelPort // 3000' "$PANEL_CONFIG")
+  PANEL_PATH=$(jq -r '.panelPath // "/admin"' "$PANEL_CONFIG")
   EXPOSE=$(jq -r '.exposePanel'         "$PANEL_CONFIG")
+  AUTO_UPDATE_ENABLED=$(jq -r '.autoUpdateEnabled // false' "$PANEL_CONFIG")
   ADMIN_EMAIL=$(jq -r '.adminEmail // ""' "$PANEL_CONFIG")
   # v1.2.3: read Caddy paths from config if present
   CADDY_BIN=$(jq -r '.caddyBin     // "/usr/local/bin/caddy-naive"' "$PANEL_CONFIG")
   CADDY_FILE=$(jq -r '.caddyFile   // "/etc/caddy-naive/Caddyfile"' "$PANEL_CONFIG")
   CADDY_CONFIG_DIR=$(jq -r '.caddyConfigDir // "/etc/caddy-naive"'  "$PANEL_CONFIG")
   FAKE_SITE_DIR=$(jq -r '.fakeSiteDir   // "/var/www/fake-site"'    "$PANEL_CONFIG")
+}
+
+panel_url() {
+  echo "http://127.0.0.1:${PANEL_PORT}${PANEL_PATH}"
 }
 
 # ── Bug 81: config migration ──────────────────────────────────────────────────
@@ -239,11 +254,20 @@ get_caddy_version_file() {
   fi
 }
 
+check_update_available() {
+  local current; current=$(get_current_version)
+  if version_gt "$TARGET_VERSION" "$current"; then
+    echo "update"
+  else
+    echo "current"
+  fi
+}
+
 # ── v1.2.3: Rebuild Caddyfile via panel API (rebuild-all endpoint) ────────────
 # Used by --repair. Avoids duplicating build logic from index.js.
 rebuild_via_api() {
   log_step "Rebuilding Caddyfile + mita config via panel API (/api/services/rebuild-all)"
-  local panel_url="http://127.0.0.1:3000"
+  local panel_url; panel_url=$(panel_url)
 
   # We need a session cookie; read admin credentials from config
   local admin_user; admin_user=$(jq -r '.adminUser // "admin"' "$PANEL_CONFIG")
@@ -251,7 +275,7 @@ rebuild_via_api() {
   # Try to get admin password hash and call API with session auth
   # The panel must be running for this to work
   if ! curl -sf "$panel_url/" -o /dev/null 2>/dev/null; then
-    log_warn "Panel not responding at :3000 — rebuilding configs directly"
+    log_warn "Panel not responding at $panel_url — rebuilding configs directly"
     rebuild_caddyfile_direct
     rebuild_mita_state_direct
     return
@@ -715,6 +739,9 @@ update_panel() {
   mkdir -p "$PANEL_DIR"
   # Copy everything including dotfiles; cp -a preserves structure.
   cp -a "$src/." "$PANEL_DIR/"
+  local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  [[ -f "$script_dir/update.sh" ]] && cp "$script_dir/update.sh" "$PANEL_DIR/update.sh" 2>/dev/null || true
+  [[ -f "$script_dir/install.sh" ]] && cp "$script_dir/install.sh" "$PANEL_DIR/install.sh" 2>/dev/null || true
 
   # npm install must NOT be fatal — keep going even on a transient failure.
   ( cd "$PANEL_DIR" && npm install --omit=dev --silent ) \
@@ -775,10 +802,11 @@ smoke_test() {
   fi
 
   # Panel HTTP
-  if curl -sf http://127.0.0.1:3000/ -o /dev/null 2>/dev/null; then
-    echo -e "  ${GREEN}✓${NC} Panel HTTP :3000 OK"; (( pass++ ))
+  local panel_url; panel_url=$(panel_url)
+  if curl -sf "$panel_url/" -o /dev/null 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} Panel HTTP OK (${panel_url})"; (( pass++ ))
   else
-    echo -e "  ${YELLOW}⚠${NC}  Panel :3000 not responding"
+    echo -e "  ${YELLOW}⚠${NC}  Panel not responding (${panel_url})"
   fi
 
   # mita status
@@ -838,8 +866,8 @@ do_status() {
   echo -e "${BOLD}Configuration:${NC}"
   if [[ -f "$PANEL_CONFIG" ]]; then
     jq '{ domain, serverIp, naivePort, mieruPortStart, mieruPortEnd,
-          exposePanel, trafficPattern, mtu, udpEnabled,
-          fakeSiteUrl, probeSecret }' \
+          panelHost, panelPort, panelPath, exposePanel, autoUpdateEnabled,
+          trafficPattern, mtu, udpEnabled, fakeSiteUrl, probeSecret }' \
       "$PANEL_CONFIG" 2>/dev/null | sed 's/^/  /'
   else
     echo "  config.json NOT FOUND"
@@ -890,6 +918,29 @@ do_status() {
   echo ""
 }
 
+do_check_update() {
+  local current; current=$(get_current_version)
+  if version_gt "$TARGET_VERSION" "$current"; then
+    log_info "Update available: $current -> $TARGET_VERSION"
+  else
+    log_info "Already up to date: $current"
+  fi
+}
+
+do_auto() {
+  if [[ "$AUTO_UPDATE_ENABLED" != "true" ]]; then
+    log_info "Auto-update is disabled in config; nothing to do."
+    return 0
+  fi
+  local current; current=$(get_current_version)
+  if ! version_gt "$TARGET_VERSION" "$current"; then
+    log_info "Auto-update check: already at $current."
+    return 0
+  fi
+  YES=true
+  do_update
+}
+
 # ── --expose mode ─────────────────────────────────────────────────────────────
 do_expose() {
   log_step "Switching panel to public mode (expose)"
@@ -899,33 +950,33 @@ do_expose() {
 
   auto_backup >/dev/null
 
-  jq --argjson v true '.exposePanel = $v' "$PANEL_CONFIG" > /tmp/cfg.tmp && \
+  jq --argjson v true '.exposePanel = $v | .panelHost = "0.0.0.0"' "$PANEL_CONFIG" > /tmp/cfg.tmp && \
     mv /tmp/cfg.tmp "$PANEL_CONFIG"
 
-  ufw allow 8080/tcp comment "Panel Web UI" 2>/dev/null || true
+  ufw allow "${PANEL_PORT}/tcp" comment "Panel Web UI" 2>/dev/null || true
   pm2 restart panel-naive-mieru 2>/dev/null || true
-  log_info "Panel accessible at http://$EXPOSE_DOMAIN:8080/ ✓"
+  log_info "Panel accessible at http://$EXPOSE_DOMAIN:${PANEL_PORT}${PANEL_PATH}/ ✓"
 }
 
 # ── --ssh-only mode ───────────────────────────────────────────────────────────
 do_ssh_only() {
   log_step "Switching panel to SSH-only mode"
 
-  $DRY_RUN && { log_dry "Would switch panel to 127.0.0.1:3000 (SSH-only)"; return; }
+  $DRY_RUN && { log_dry "Would switch panel to 127.0.0.1:${PANEL_PORT}${PANEL_PATH} (SSH-only)"; return; }
 
   auto_backup >/dev/null
 
-  jq --argjson v false '.exposePanel = $v' "$PANEL_CONFIG" > /tmp/cfg.tmp && \
+  jq --argjson v false '.exposePanel = $v | .panelHost = "127.0.0.1"' "$PANEL_CONFIG" > /tmp/cfg.tmp && \
     mv /tmp/cfg.tmp "$PANEL_CONFIG"
 
-  ufw delete allow 8080/tcp 2>/dev/null || true
+  ufw delete allow "${PANEL_PORT}/tcp" 2>/dev/null || true
   pm2 restart panel-naive-mieru 2>/dev/null || true
-  log_info "Panel now SSH-only (127.0.0.1:3000) ✓"
+  log_info "Panel now SSH-only (127.0.0.1:${PANEL_PORT}${PANEL_PATH}) ✓"
 
   local server_ip; server_ip=$(jq -r '.serverIp' "$PANEL_CONFIG")
   echo ""
-  echo -e "  SSH tunnel:  ${CYAN}ssh -L 3000:127.0.0.1:3000 root@$server_ip${NC}"
-  echo -e "  Then open:   ${CYAN}http://localhost:3000/${NC}"
+  echo -e "  SSH tunnel:  ${CYAN}ssh -L ${PANEL_PORT}:127.0.0.1:${PANEL_PORT} root@$server_ip${NC}"
+  echo -e "  Then open:   ${CYAN}http://localhost:${PANEL_PORT}${PANEL_PATH}/${NC}"
 }
 
 # ── --repair mode ─────────────────────────────────────────────────────────────
@@ -1095,11 +1146,21 @@ main() {
   parse_args "$@"
   check_root
 
+  if [[ "$MODE" == "update" || "$MODE" == "auto" ]]; then
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+      log_warn "Another update process is already running."
+      exit 0
+    fi
+  fi
+
   case "$MODE" in
+    check-update) check_install; load_config; do_check_update ;;
     status)   check_install; load_config; do_status ;;
     expose)   check_install; load_config; do_expose ;;
     ssh-only) check_install; load_config; do_ssh_only ;;
     repair)   check_install; load_config; do_repair ;;
+    auto)     check_install; load_config; do_auto ;;
     update)   check_install; load_config; do_update ;;
   esac
 }
