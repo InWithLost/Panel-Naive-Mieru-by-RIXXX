@@ -723,7 +723,7 @@ async function downloadMieruConfig() {
     const q = mieruPortQuery();
     if (q === null) return;              // invalid port — abort (toast already shown)
     const res = await fetch(
-      `/api/users/${state.selectedUserId}/config/mieru${q}`,
+      panelPath(`/api/users/${state.selectedUserId}/config/mieru${q}`),
       { credentials: 'include' });
     if (res.status === 401) { redirectToLogin(); return; }
     if (!res.ok) throw new Error(await res.text());
@@ -740,7 +740,7 @@ async function downloadUniversalConfig() {
     const q = mieruPortQuery();
     if (q === null) return;              // invalid port — abort (toast already shown)
     const res = await fetch(
-      `/api/users/${state.selectedUserId}/config/universal${q}`,
+      panelPath(`/api/users/${state.selectedUserId}/config/universal${q}`),
       { credentials: 'include' });
     if (res.status === 401) { redirectToLogin(); return; }
     if (!res.ok) throw new Error(await res.text());

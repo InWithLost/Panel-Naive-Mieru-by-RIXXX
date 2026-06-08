@@ -1899,13 +1899,16 @@ app.get('/api/users/:id/config/universal', requireAuth, (req, res) => {
 
 // Back-compat aliases
 app.get('/api/users/:id/naive-link', requireAuth, (req, res) => {
-  res.redirect(307, `/api/users/${req.params.id}/config/naive${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`);
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  res.redirect(307, `${PANEL_BASE_PATH}/api/users/${req.params.id}/config/naive${query}`);
 });
 app.get('/api/users/:id/mieru-config', requireAuth, (req, res) => {
-  res.redirect(307, `/api/users/${req.params.id}/config/mieru${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`);
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  res.redirect(307, `${PANEL_BASE_PATH}/api/users/${req.params.id}/config/mieru${query}`);
 });
 app.get('/api/users/:id/universal-config', requireAuth, (req, res) => {
-  res.redirect(307, `/api/users/${req.params.id}/config/universal${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`);
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  res.redirect(307, `${PANEL_BASE_PATH}/api/users/${req.params.id}/config/universal${query}`);
 });
 
 // ── Monitoring — /api/status ──────────────────────────────────────────────────
