@@ -527,7 +527,7 @@ FAKEHTML
 # Bug 27: backup existing Caddyfile; restore DB users when --force.
 # Bug 28: no  tls <email>  in site block — Caddy handles TLS automatically.
 # Bug 29: directive order inside forward_proxy:  basic_auth → hide_ip → hide_via → probe_resistance.
-# Bug 30: global  order forward_proxy before file_server.
+# Bug 30: global  order handle before forward_proxy before file_server.
 # Bug 33: DNS check — warn if domain doesn't resolve to server IP.
 # Bug 38: log rotation uses  roll_keep_for 720h  (30 days).
 write_caddyfile() {
@@ -596,6 +596,9 @@ write_caddyfile() {
         adminEmail:  '${ADMIN_EMAIL}',
         domain:      '${DOMAIN}',
         naivePort:   ${NAIVE_PORT},
+        panelPort:   ${PANEL_PORT},
+        panelPath:   '${PANEL_PATH}',
+        exposePanel: '${EXPOSE_PANEL^^}' === 'Y' || '${EXPOSE_PANEL^^}' === 'Д',
         fakeSiteDir: '${FAKE_SITE_DIR}',
         probeSecret: '${PROBE_SECRET}',
         probeMode:   '${PROBE_MODE:-bare}',
@@ -634,14 +637,24 @@ write_caddyfile() {
       secret) [[ -n "${PROBE_SECRET:-}" ]] && probe_line="    probe_resistance ${PROBE_SECRET}" || probe_line="    probe_resistance" ;;
       *)      probe_line="    probe_resistance" ;;
     esac
+    local panel_path="${PANEL_PATH:-/admin}"
+    local panel_block=""
+    if [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]]; then
+      panel_block="
 
-    # Bug 28: no tls directive — Caddy automatic HTTPS handles it
+  handle ${panel_path}* {
+    reverse_proxy 127.0.0.1:${PANEL_PORT}
+  }"
+    fi
+
+    # Bug 28: no tls directive – Caddy automatic HTTPS handles it
     # Bug 29: order: basic_auth → hide_ip → hide_via → probe_resistance
     # Bug 30: order forward_proxy before file_server
     # Bug 38: roll_keep_for 720h instead of roll_keep 5
     # Bug 21: no site-level log block
-    caddyfile_content="{
+  caddyfile_content="{
   # Bug 30: ensure forward_proxy is evaluated before file_server
+  order handle before forward_proxy
   order forward_proxy before file_server
   # Bug 80: HTTP/1.1 + HTTP/2 only (disable HTTP/3 / QUIC)
   servers {
@@ -672,6 +685,7 @@ write_caddyfile() {
   # ('line 665: port: No such file or directory' was Bug 88).
   tls ${ADMIN_EMAIL}
 
+${panel_block}
   forward_proxy {
 ${auth_lines}
     hide_ip
@@ -871,8 +885,6 @@ setup_ufw() {
   # Bug 7: single-port safe helper
   _ufw_mieru_rule "$MIERU_PORT_START" "$MIERU_PORT_END" tcp "Mieru TCP"
   _ufw_mieru_rule "$MIERU_PORT_START" "$MIERU_PORT_END" udp "Mieru UDP"
-  local panel_port; panel_port=$(jq -r '.panelPort // 3000' "$PANEL_CONFIG" 2>/dev/null || echo 3000)
-  [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]] && ufw allow "${panel_port}/tcp" comment "Panel Web UI"
   ufw --force enable || true
   log_info "$(t 'Правила UFW применены ✓' 'UFW rules applied ✓')"
 }
@@ -1146,7 +1158,6 @@ except Exception:
   # PM2 panel
   cd "$PANEL_DIR"
   local panel_host="127.0.0.1"
-  [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]] && panel_host="0.0.0.0"
   local panel_port="${PANEL_PORT:-3000}"
   local panel_path="${PANEL_PATH:-/admin}"
   pm2 delete panel-naive-mieru 2>/dev/null || true
@@ -1342,7 +1353,7 @@ print_banner() {
   echo ""
   echo -e "  ${BOLD}$(t 'Доступ к панели' 'Panel access'):${NC}"
   if [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]]; then
-    echo -e "    $(t 'Публичный URL' 'Public URL'):  ${CYAN}http://$server_ip:${panel_port}${panel_path}/${NC}"
+    echo -e "    $(t 'Публичный URL' 'Public URL'):  ${CYAN}https://$DOMAIN${panel_path}/${NC}"
   else
     echo -e "    SSH: ${CYAN}ssh -L ${panel_port}:127.0.0.1:${panel_port} root@$server_ip${NC}"
     echo -e "    $(t 'Затем откройте' 'Then open'):  ${CYAN}http://localhost:${panel_port}${panel_path}/${NC}"
@@ -1417,3 +1428,9 @@ main() {
 }
 
 main "$@"
+
+
+
+
+
+

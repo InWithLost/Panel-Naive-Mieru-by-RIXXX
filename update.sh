@@ -364,6 +364,9 @@ if (fs.existsSync(TEMPLATE_JS)) {
     adminEmail:  cfg.adminEmail  || '',
     domain:      cfg.domain      || 'localhost',
     naivePort:   cfg.naivePort   || 443,
+    panelPort:   cfg.panelPort   || 3000,
+    panelPath:   cfg.panelPath   || '/admin',
+    exposePanel: cfg.exposePanel === true,
     fakeSiteDir: cfg.fakeSiteDir || FAKE_SITE,
     probeSecret,
     probeMode,
@@ -380,12 +383,18 @@ if (fs.existsSync(TEMPLATE_JS)) {
     const rnd = crypto.randomBytes(20).toString('hex');
     authLines = '    basic_auth _placeholder_' + rnd.slice(0, 16) + ' _disabled_' + rnd.slice(16);
   }
+  const panelPath = String(cfg.panelPath || '/admin').trim() || '/admin';
+  const exposePanel = cfg.exposePanel === true;
+  const panelBlock = exposePanel
+    ? '\n\n  handle ' + panelPath + '* {\n    reverse_proxy 127.0.0.1:' + (cfg.panelPort || 3000) + '\n  }'
+    : '';
   let probeLine;
   if (probeMode === 'off') probeLine = '';
   else if (probeMode === 'secret' && probeSecret) probeLine = '\n    probe_resistance ' + probeSecret;
   else probeLine = '\n    probe_resistance';
   content = [
     '{',
+    '  order handle before forward_proxy',
     '  order forward_proxy before file_server',
     '  servers {',
     '    protocols h1 h2',
@@ -409,6 +418,7 @@ if (fs.existsSync(TEMPLATE_JS)) {
     ':' + (cfg.naivePort || 443) + ', ' + (cfg.domain || 'localhost') + ' {',
     '  tls ' + (cfg.adminEmail || ''),
     '',
+    panelBlock,
     '  forward_proxy {',
     authLines,
     '    hide_ip',
@@ -950,14 +960,15 @@ do_expose() {
 
   auto_backup >/dev/null
 
-  jq --argjson v true '.exposePanel = $v | .panelHost = "0.0.0.0"' "$PANEL_CONFIG" > /tmp/cfg.tmp && \
+  jq --argjson v true --arg domain "$EXPOSE_DOMAIN" '.exposePanel = $v | .domain = $domain | .panelHost = "127.0.0.1"' "$PANEL_CONFIG" > /tmp/cfg.tmp && \
     mv /tmp/cfg.tmp "$PANEL_CONFIG"
 
-  ufw allow "${PANEL_PORT}/tcp" comment "Panel Web UI" 2>/dev/null || true
-  PANEL_HOST="0.0.0.0" PANEL_PORT="$PANEL_PORT" PANEL_PATH="$PANEL_PATH" \
+  rebuild_caddyfile_direct || log_warn "Caddyfile rebuild failed during expose"
+  systemctl restart caddy-naive 2>/dev/null || true
+  PANEL_HOST="127.0.0.1" PANEL_PORT="$PANEL_PORT" PANEL_PATH="$PANEL_PATH" \
     pm2 restart panel-naive-mieru --update-env 2>/dev/null || \
     pm2 restart panel-naive-mieru 2>/dev/null || true
-  log_info "Panel accessible at http://$EXPOSE_DOMAIN:${PANEL_PORT}${PANEL_PATH}/ ✓"
+  log_info "Panel accessible at https://$EXPOSE_DOMAIN${PANEL_PATH}/ ✓"
 }
 
 # ── --ssh-only mode ───────────────────────────────────────────────────────────
@@ -971,7 +982,8 @@ do_ssh_only() {
   jq --argjson v false '.exposePanel = $v | .panelHost = "127.0.0.1"' "$PANEL_CONFIG" > /tmp/cfg.tmp && \
     mv /tmp/cfg.tmp "$PANEL_CONFIG"
 
-  ufw delete allow "${PANEL_PORT}/tcp" 2>/dev/null || true
+  rebuild_caddyfile_direct || log_warn "Caddyfile rebuild failed during ssh-only switch"
+  systemctl restart caddy-naive 2>/dev/null || true
   PANEL_HOST="127.0.0.1" PANEL_PORT="$PANEL_PORT" PANEL_PATH="$PANEL_PATH" \
     pm2 restart panel-naive-mieru --update-env 2>/dev/null || \
     pm2 restart panel-naive-mieru 2>/dev/null || true

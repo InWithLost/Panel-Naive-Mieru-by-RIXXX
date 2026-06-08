@@ -484,6 +484,9 @@ function buildCaddyfile(config, users) {
       adminEmail:  config.adminEmail  || '',
       domain:      config.domain      || 'localhost',
       naivePort:   config.naivePort   || 443,
+      panelPort:   config.panelPort   || 3000,
+      panelPath:   config.panelPath   || '/admin',
+      exposePanel: config.exposePanel === true,
       fakeSiteDir: resolvedFakeSiteDir,
       probeSecret,
       probeMode,
@@ -524,12 +527,17 @@ function buildCaddyfile(config, users) {
   // Bug 92: normalize the upstream so forward_proxy gets a clean https:// URL.
   const upstreamUrl = (config.cascadeEnabled && config.cascadeNaiveUpstream) ? normalizeUpstream(config.cascadeNaiveUpstream) : '';
   const upstreamLine = upstreamUrl ? `\n    upstream ${upstreamUrl}` : '';
+  const panelPath = normalizePanelPath(config.panelPath || '/admin');
+  const panelBlock = (config.exposePanel === true)
+    ? `\n\n  handle ${panelPath}* {\n    reverse_proxy 127.0.0.1:${config.panelPort || 3000}\n  }`
+    : '';
 
   // Bug 28: no "tls <email>" inside site block
   // Bug 30: order directive in global block
   // Bug 38: roll_keep_for 720h
   return `{
   # Bug 30: evaluate forwardproxy before file_server
+  order handle before forward_proxy
   order forward_proxy before file_server
   # Bug 80: HTTP/1.1 + HTTP/2 only (disable HTTP/3 / QUIC)
   servers {
@@ -557,6 +565,7 @@ function buildCaddyfile(config, users) {
   # listener + explicit tls + no route{} wrapper).
   tls ${config.adminEmail || ''}
 
+${panelBlock}
   forward_proxy {
     # Bug 23: no bare "basic_auth" token; each line IS the credential directive
     # Bug 29: order — credentials → hide_ip → hide_via → probe_resistance
@@ -1125,16 +1134,17 @@ app.get('/api/update/status', requireAuth, (req, res) => {
   const currentVersion = getCurrentVersion();
   const targetVersion = cfg.version || '1.2.6';
   const panelHost = cfg.panelHost || '127.0.0.1';
-  const panelUrl = panelHost === '0.0.0.0'
-    ? `http://${cfg.serverIp || '127.0.0.1'}:${cfg.panelPort}${cfg.panelPath}/`
-    : `http://${panelHost}:${cfg.panelPort}${cfg.panelPath}/`;
+  const panelPath = normalizePanelPath(cfg.panelPath || '/admin');
+  const panelUrl = cfg.exposePanel === true
+    ? `https://${cfg.domain || cfg.serverIp || 'localhost'}${panelPath}/`
+    : `http://${panelHost}:${cfg.panelPort}${panelPath}/`;
   res.json({
     ok: true,
     currentVersion,
     targetVersion,
     updateAvailable: versionGt(targetVersion, currentVersion),
     autoUpdateEnabled: cfg.autoUpdateEnabled === true,
-    panel: { host: panelHost, port: cfg.panelPort, path: cfg.panelPath, url: panelUrl }
+    panel: { host: panelHost, port: cfg.panelPort, path: panelPath, url: panelUrl }
   });
 });
 
