@@ -642,7 +642,7 @@ write_caddyfile() {
     if [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]]; then
       panel_block="
 
-  handle ${panel_path}* {
+  handle_path ${panel_path}* {
     reverse_proxy 127.0.0.1:${PANEL_PORT}
   }"
     fi

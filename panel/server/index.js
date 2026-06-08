@@ -529,7 +529,7 @@ function buildCaddyfile(config, users) {
   const upstreamLine = upstreamUrl ? `\n    upstream ${upstreamUrl}` : '';
   const panelPath = normalizePanelPath(config.panelPath || '/admin');
   const panelBlock = (config.exposePanel === true)
-    ? `\n\n  handle ${panelPath}* {\n    reverse_proxy 127.0.0.1:${config.panelPort || 3000}\n  }`
+    ? `\n\n  handle_path ${panelPath}* {\n    reverse_proxy 127.0.0.1:${config.panelPort || 3000}\n  }`
     : '';
 
   // Bug 28: no "tls <email>" inside site block

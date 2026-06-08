@@ -71,7 +71,7 @@ function render(cfg, naiveUsers) {
   const upstreamUrl = normalizeUpstream(cfg.upstream || '');
   const upstreamLine = upstreamUrl ? `\n    upstream ${upstreamUrl}` : '';
   const panelBlock = exposePanel
-    ? `\n\n  handle ${panelPath}* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }`
+    ? `\n\n  handle_path ${panelPath}* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }`
     : '';
 
 return `{

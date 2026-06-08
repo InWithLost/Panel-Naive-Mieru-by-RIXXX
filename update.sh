@@ -386,7 +386,7 @@ if (fs.existsSync(TEMPLATE_JS)) {
   const panelPath = String(cfg.panelPath || '/admin').trim() || '/admin';
   const exposePanel = cfg.exposePanel === true;
   const panelBlock = exposePanel
-    ? '\n\n  handle ' + panelPath + '* {\n    reverse_proxy 127.0.0.1:' + (cfg.panelPort || 3000) + '\n  }'
+    ? '\n\n  handle_path ' + panelPath + '* {\n    reverse_proxy 127.0.0.1:' + (cfg.panelPort || 3000) + '\n  }'
     : '';
   let probeLine;
   if (probeMode === 'off') probeLine = '';
