@@ -417,15 +417,17 @@ if (fs.existsSync(TEMPLATE_JS)) {
     '',
     // Bug 83: host-based HTTPS site; Caddy automates TLS for the domain.
     (cfg.domain || 'localhost') + ' {',
+    '  route {',
     panelBlock,
-    '  forward_proxy {',
+    '    forward_proxy {',
     authLines,
-    '    hide_ip',
-    '    hide_via' + probeLine,
-    '  }',
+    '      hide_ip',
+    '      hide_via' + probeLine,
+    '    }',
     '',
-    '  file_server {',
-    '    root ' + (cfg.fakeSiteDir || FAKE_SITE),
+    '    file_server {',
+    '      root ' + (cfg.fakeSiteDir || FAKE_SITE),
+    '    }',
     '  }',
     '}'
   ].join('\n');

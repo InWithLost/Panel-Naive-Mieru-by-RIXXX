@@ -685,18 +685,20 @@ ${DOMAIN} {
   # would close the string and a colon-redirect would be parsed as a file
   # ('line 665: port: No such file or directory' was Bug 88).
 
+  route {
 ${panel_block}
-  forward_proxy {
+    forward_proxy {
 ${auth_lines}
-    hide_ip
-    hide_via"
+      hide_ip
+      hide_via"
     [[ -n "$probe_line" ]] && caddyfile_content+="
 ${probe_line}"
     caddyfile_content+="
-  }
+    }
 
-  file_server {
-    root ${FAKE_SITE_DIR}
+    file_server {
+      root ${FAKE_SITE_DIR}
+    }
   }
 }"
   fi

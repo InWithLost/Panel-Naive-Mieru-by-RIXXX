@@ -564,17 +564,19 @@ function buildCaddyfile(config, users) {
 ${config.domain || 'localhost'} {
   # Bug 83: host-based HTTPS site; Caddy will automate TLS for the domain.
 
+  route {
 ${panelBlock}
-  forward_proxy {
-    # Bug 23: no bare "basic_auth" token; each line IS the credential directive
-    # Bug 29: order — credentials → hide_ip → hide_via → probe_resistance
+    forward_proxy {
+      # Bug 23: no bare "basic_auth" token; each line IS the credential directive
+      # Bug 29: order — credentials → hide_ip → hide_via → probe_resistance
 ${authLines}
-    hide_ip
-    hide_via${probeLine}${upstreamLine}
-  }
+      hide_ip
+      hide_via${probeLine}${upstreamLine}
+    }
 
-  file_server {
-    root ${resolvedFakeSiteDir}
+    file_server {
+      root ${resolvedFakeSiteDir}
+    }
   }
 }
 `;

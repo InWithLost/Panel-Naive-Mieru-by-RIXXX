@@ -97,14 +97,16 @@ return `{
 }
 
 ${domain} {
-  ${panelBlock}
-  forward_proxy {
+  route {
+${panelBlock}
+    forward_proxy {
 ${authLines}
-    hide_ip
-    hide_via${probeLine}${upstreamLine}
-  }
-  file_server {
-    root ${fakeSite}
+      hide_ip
+      hide_via${probeLine}${upstreamLine}
+    }
+    file_server {
+      root ${fakeSite}
+    }
   }
 }
 `;
