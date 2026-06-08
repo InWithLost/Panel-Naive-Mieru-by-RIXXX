@@ -1,7 +1,6 @@
 {
   "lang": "en",
   "langName": "English",
-
   "login": {
     "title": "RIXXX Panel",
     "sessionExpired": "Session expired — please log in again",
@@ -16,7 +15,6 @@
     "telegramSupport": "Telegram Support",
     "github": "GitHub"
   },
-
   "nav": {
     "dashboard": "Dashboard",
     "users": "Users",
@@ -27,11 +25,9 @@
     "diagnostics": "Diagnostics",
     "administrator": "Administrator"
   },
-
   "topbar": {
     "realtime": "Real-time connection"
   },
-
   "dashboard": {
     "title": "Dashboard",
     "naiveProxy": "NaiveProxy",
@@ -60,7 +56,6 @@
     "active": "Active",
     "inactive": "Inactive"
   },
-
   "users": {
     "title": "Users",
     "addUser": "Add User",
@@ -104,9 +99,11 @@
     "usernameRequired": "Username and email are required",
     "passwordRequired": "Password is required for new users",
     "passwordTooShort": "Password must be at least 8 characters",
-    "protocolRequired": "Select at least one protocol"
+    "protocolRequired": "Select at least one protocol",
+    "alreadyDeleted": "User is already deleted",
+    "emailConflict": "Email already exists",
+    "usernameConflict": "Username already exists"
   },
-
   "config": {
     "downloadTitle": "Download Client Config",
     "downloadNote": "The user's stored password is embedded automatically. Copy the link or download a config file.",
@@ -127,7 +124,6 @@
     "qrCode": "QR Code",
     "qrNote": "Scan QR code with client app (iOS: ShadowRocket, Karing)"
   },
-
   "settings": {
     "title": "Server Settings",
     "probeSecretTitle": "Probe Resistance Secret",
@@ -229,7 +225,6 @@
     "cascadeMieruUserRequired": "Please provide Mieru exit username",
     "cascadeMieruPassRequired": "Please provide Mieru exit password"
   },
-
   "monitoring": {
     "title": "Monitoring",
     "refresh": "Refresh",
@@ -252,7 +247,6 @@
     "active": "Active",
     "inactive": "Inactive"
   },
-
   "logs": {
     "title": "Logs",
     "caddy": "Naive",
@@ -268,7 +262,6 @@
     "selectLog": "Select a log above…",
     "error": "Error: {{msg}}"
   },
-
   "audit": {
     "title": "Audit",
     "refresh": "Refresh",
@@ -280,7 +273,6 @@
     "loading": "Loading audit log…",
     "empty": "No audit entries yet"
   },
-
   "diagnostics": {
     "title": "Diagnostics",
     "runChecks": "Run Checks",
@@ -300,12 +292,10 @@
     "naivePort": "NaiveProxy port {{port}}",
     "mieruPort": "Mieru port {{port}}"
   },
-
   "service": {
     "actionOk": "{{service}}: {{action}} OK",
     "actionFail": "{{service}} {{action}} failed: {{msg}}"
   },
-
   "toast": {
     "naivePortUpdated": "NaiveProxy port updated — clients need new configs",
     "mieruPortsUpdated": "Mieru ports updated — service restarted, clients need new configs",
@@ -313,7 +303,6 @@
     "error": "Error",
     "info": "Info"
   },
-
   "theme": {
     "dark": "Dark mode",
     "light": "Light mode"

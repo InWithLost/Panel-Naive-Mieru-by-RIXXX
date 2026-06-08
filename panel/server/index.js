@@ -336,6 +336,20 @@ function isUniqueConstraintError(err, column) {
   return err && err.code === 'SQLITE_CONSTRAINT_UNIQUE'
     && String(err.message || '').includes(`users.${column}`);
 }
+function sendUserConflict(res, field, existingUser) {
+  return res.status(409).json({
+    error: field === 'email' ? 'Email already exists' : 'Username already exists',
+    code: 'USER_CONFLICT',
+    field,
+    existing: existingUser
+      ? {
+          id: existingUser.id,
+          username: existingUser.username,
+          email: normalizeUserEmail(existingUser.email)
+        }
+      : null
+  });
+}
 function upsertUser(u) {
   const row = { ...u, email: normalizeUserEmail(u.email), password: u.password || '' };
   if (db) {
@@ -1273,13 +1287,14 @@ app.post('/api/users', requireAuth, (req, res) => {
   if (validation.error)
     return res.status(400).json({ error: validation.error });
 
-  if (getUserByUsername(username))
-    return res.status(409).json({ error: 'Username already exists' });
+  const existingUsername = getUserByUsername(username);
+  if (existingUsername)
+    return sendUserConflict(res, 'username', existingUsername);
 
   const normalizedEmail = normalizeUserEmail(email);
   const existingEmail = getUserByEmail(normalizedEmail);
   if (existingEmail)
-    return res.status(409).json({ error: 'Email already exists' });
+    return sendUserConflict(res, 'email', existingEmail);
 
   if (expiry && isNaN(Date.parse(expiry)))
     return res.status(400).json({ error: 'expiry must be a valid ISO date string' });
@@ -1303,9 +1318,9 @@ app.post('/api/users', requireAuth, (req, res) => {
     upsertUser(user);
   } catch (e) {
     if (isUniqueConstraintError(e, 'username'))
-      return res.status(409).json({ error: 'Username already exists' });
+      return sendUserConflict(res, 'username', getUserByUsername(username));
     if (isUniqueConstraintError(e, 'email'))
-      return res.status(409).json({ error: 'Email already exists' });
+      return sendUserConflict(res, 'email', getUserByEmail(normalizedEmail));
     throw e;
   }
 
@@ -1335,15 +1350,20 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
   if (expiry !== undefined && expiry !== null && isNaN(Date.parse(expiry)))
     return res.status(400).json({ error: 'expiry must be a valid ISO date string' });
 
+  const normalizedUsername = username ?? user.username;
+  const existingUsername = getUserByUsername(normalizedUsername);
+  if (existingUsername && existingUsername.id !== user.id)
+    return sendUserConflict(res, 'username', existingUsername);
+
   const normalizedEmail = email !== undefined ? normalizeUserEmail(email) : normalizeUserEmail(user.email);
   const existingEmail = getUserByEmail(normalizedEmail);
   if (existingEmail && existingEmail.id !== user.id)
-    return res.status(409).json({ error: 'Email already exists' });
+    return sendUserConflict(res, 'email', existingEmail);
 
   const updated = {
     ...user,
     email:     normalizedEmail,
-    username:  username  ?? user.username,
+    username:  normalizedUsername,
     expiry:    expiry    !== undefined ? (expiry || null) : user.expiry,
     protocols: protocols
       ? JSON.stringify(validation.protocols)
@@ -1361,9 +1381,9 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
     upsertUser(updated);
   } catch (e) {
     if (isUniqueConstraintError(e, 'username'))
-      return res.status(409).json({ error: 'Username already exists' });
+      return sendUserConflict(res, 'username', getUserByUsername(normalizedUsername));
     if (isUniqueConstraintError(e, 'email'))
-      return res.status(409).json({ error: 'Email already exists' });
+      return sendUserConflict(res, 'email', getUserByEmail(normalizedEmail));
     throw e;
   }
 
@@ -1375,12 +1395,18 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
 });
 
 app.delete('/api/users/:id', requireAuth, (req, res) => {
-  const user = getUserById(req.params.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  deleteUser(req.params.id);
+  let user = getUserById(req.params.id);
+  let matchedBy = 'id';
+  const fallbackUsername = String(req.query.username || '').trim();
+  if (!user && fallbackUsername) {
+    user = getUserByUsername(fallbackUsername);
+    matchedBy = 'username';
+  }
+  if (!user) return res.json({ ok: true, alreadyDeleted: true, servicesReloaded: true });
+  deleteUser(user.id);
   const svcStatus = applyAllConfigs();
-  audit('user:delete', { id: user.id, username: user.username }, req.session.username);
-  res.json({ ok: true, ...svcStatus });
+  audit('user:delete', { id: user.id, username: user.username, matchedBy }, req.session.username);
+  res.json({ ok: true, deleted: { id: user.id, username: user.username, matchedBy }, ...svcStatus });
 });
 
 // ── Server settings ───────────────────────────────────────────────────────────

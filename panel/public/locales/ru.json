@@ -99,7 +99,10 @@
     "usernameRequired": "Имя пользователя и email обязательны",
     "passwordRequired": "Пароль обязателен для нового пользователя",
     "passwordTooShort": "Пароль должен содержать минимум 8 символов",
-    "protocolRequired": "Выберите хотя бы один протокол"
+    "protocolRequired": "Выберите хотя бы один протокол",
+    "alreadyDeleted": "Пользователь уже удален",
+    "emailConflict": "Email уже используется",
+    "usernameConflict": "Username уже используется"
   },
   "config": {
     "downloadTitle": "Скачать клиентский конфиг",

@@ -584,10 +584,23 @@ async function saveUser() {
     closeUserModal();
     loadUsers();
   } catch (err) {
-    showUserError(err.message);
+    showUserError(formatUserSaveError(err));
   } finally {
     setBtnBusy(saveBtn, false);
   }
+}
+
+function formatUserSaveError(err) {
+  const data = err?.data;
+  if (err?.status === 409 && data?.code === 'USER_CONFLICT') {
+    const existing = data.existing || {};
+    const owner = [existing.username, existing.email].filter(Boolean).join(' / ');
+    if (data.field === 'email')
+      return `${t('users.emailConflict') || 'Email already exists'}${owner ? `: ${owner}` : ''}`;
+    if (data.field === 'username')
+      return `${t('users.usernameConflict') || 'Username already exists'}${owner ? `: ${owner}` : ''}`;
+  }
+  return err?.message || 'Error';
 }
 
 function showUserError(msg) {
@@ -599,7 +612,13 @@ function showUserError(msg) {
 async function deleteUser(id, username) {
   if (!confirm(t('users.deleteConfirm', { name: username }))) return;
   try {
-    await api('DELETE', `/api/users/${id}`);
+    const usernameQuery = username ? `?username=${encodeURIComponent(username)}` : '';
+    const res = await api('DELETE', `/api/users/${id}${usernameQuery}`);
+    if (res.alreadyDeleted) {
+      toast(t('users.alreadyDeleted') || 'User is already deleted', 'info');
+      loadUsers();
+      return;
+    }
     toast(t('users.deleted', { name: username }), 'success');
     loadUsers();
   } catch (err) {
@@ -1367,8 +1386,11 @@ async function api(method, path, body) {
   if (!res.ok) {
     const msg = (typeof data === 'object' && data.error) ? data.error : String(data);
     const errMsg = msg || `HTTP ${res.status}`;
+    const err = new Error(errMsg);
+    err.status = res.status;
+    err.data = data;
     toast(errMsg, 'error');   // Bug 10: always show toast on error
-    throw new Error(errMsg);
+    throw err;
   }
   return data;
 }
