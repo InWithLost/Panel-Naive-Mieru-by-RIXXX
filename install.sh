@@ -654,7 +654,8 @@ write_caddyfile() {
     # Bug 21: no site-level log block
   caddyfile_content="{
   # Bug 30: ensure forward_proxy is evaluated before file_server
-  order handle before forward_proxy
+  order handle_path before forward_proxy
+  order handle_path before file_server
   order forward_proxy before file_server
   # Bug 80: HTTP/1.1 + HTTP/2 only (disable HTTP/3 / QUIC)
   servers {

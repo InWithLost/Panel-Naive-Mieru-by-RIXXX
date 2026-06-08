@@ -394,7 +394,8 @@ if (fs.existsSync(TEMPLATE_JS)) {
   else probeLine = '\n    probe_resistance';
   content = [
     '{',
-    '  order handle before forward_proxy',
+    '  order handle_path before forward_proxy',
+    '  order handle_path before file_server',
     '  order forward_proxy before file_server',
     '  servers {',
     '    protocols h1 h2',

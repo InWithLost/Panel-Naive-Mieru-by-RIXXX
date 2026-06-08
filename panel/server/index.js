@@ -537,7 +537,8 @@ function buildCaddyfile(config, users) {
   // Bug 38: roll_keep_for 720h
   return `{
   # Bug 30: evaluate forwardproxy before file_server
-  order handle before forward_proxy
+  order handle_path before forward_proxy
+  order handle_path before file_server
   order forward_proxy before file_server
   # Bug 80: HTTP/1.1 + HTTP/2 only (disable HTTP/3 / QUIC)
   servers {

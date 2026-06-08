@@ -75,7 +75,8 @@ function render(cfg, naiveUsers) {
     : '';
 
 return `{
-  order handle before forward_proxy
+  order handle_path before forward_proxy
+  order handle_path before file_server
   order forward_proxy before file_server
   servers {
     protocols h1 h2
