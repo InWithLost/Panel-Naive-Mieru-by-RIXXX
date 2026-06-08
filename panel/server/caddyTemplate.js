@@ -71,12 +71,10 @@ function render(cfg, naiveUsers) {
   const upstreamUrl = normalizeUpstream(cfg.upstream || '');
   const upstreamLine = upstreamUrl ? `\n    upstream ${upstreamUrl}` : '';
   const panelBlock = exposePanel
-    ? `\n\n  handle_path ${panelPath}* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }`
+    ? `\n    @panel path ${panelPath} ${panelPath}/*\n    reverse_proxy @panel 127.0.0.1:${panelPort}`
     : '';
 
 return `{
-  order handle_path before forward_proxy
-  order handle_path before file_server
   order forward_proxy before file_server
   servers {
     protocols h1 h2

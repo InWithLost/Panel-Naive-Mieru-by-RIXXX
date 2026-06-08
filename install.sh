@@ -641,10 +641,8 @@ write_caddyfile() {
     local panel_block=""
     if [[ "${EXPOSE_PANEL^^}" =~ ^(Y|Д)$ ]]; then
       panel_block="
-
-  handle_path ${panel_path}* {
-    reverse_proxy 127.0.0.1:${PANEL_PORT}
-  }"
+    @panel path ${panel_path} ${panel_path}/*
+    reverse_proxy @panel 127.0.0.1:${PANEL_PORT}"
     fi
 
     # Bug 28: no tls directive – Caddy automatic HTTPS handles it
@@ -654,8 +652,6 @@ write_caddyfile() {
     # Bug 21: no site-level log block
   caddyfile_content="{
   # Bug 30: ensure forward_proxy is evaluated before file_server
-  order handle_path before forward_proxy
-  order handle_path before file_server
   order forward_proxy before file_server
   # Bug 80: HTTP/1.1 + HTTP/2 only (disable HTTP/3 / QUIC)
   servers {

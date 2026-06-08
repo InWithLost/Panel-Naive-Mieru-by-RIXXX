@@ -80,8 +80,17 @@ verify_https() {
       log "TLS handshake looks alive"
     else
       warn "TLS handshake did not confirm cleanly; inspect /tmp/rixxx-panel-repair-curl.log"
+      return 0
     fi
-    rm -f /tmp/rixxx-panel-repair-curl.log
+
+    local code
+    code="$(curl -sk -o /tmp/rixxx-panel-repair-body.html -w '%{http_code}' "https://127.0.0.1${path}/" -H "Host: $host" || true)"
+    if [[ "$code" == "200" || "$code" == "302" ]]; then
+      log "Public panel route returned HTTP $code"
+      rm -f /tmp/rixxx-panel-repair-curl.log /tmp/rixxx-panel-repair-body.html
+    else
+      warn "Public panel route returned HTTP ${code:-unknown}; inspect /tmp/rixxx-panel-repair-curl.log and /tmp/rixxx-panel-repair-body.html"
+    fi
   fi
 }
 

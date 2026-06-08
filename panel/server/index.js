@@ -529,7 +529,7 @@ function buildCaddyfile(config, users) {
   const upstreamLine = upstreamUrl ? `\n    upstream ${upstreamUrl}` : '';
   const panelPath = normalizePanelPath(config.panelPath || '/admin');
   const panelBlock = (config.exposePanel === true)
-    ? `\n\n  handle_path ${panelPath}* {\n    reverse_proxy 127.0.0.1:${config.panelPort || 3000}\n  }`
+    ? `\n    @panel path ${panelPath} ${panelPath}/*\n    reverse_proxy @panel 127.0.0.1:${config.panelPort || 3000}`
     : '';
 
   // Bug 28: no "tls <email>" inside site block
@@ -537,8 +537,6 @@ function buildCaddyfile(config, users) {
   // Bug 38: roll_keep_for 720h
   return `{
   # Bug 30: evaluate forwardproxy before file_server
-  order handle_path before forward_proxy
-  order handle_path before file_server
   order forward_proxy before file_server
   # Bug 80: HTTP/1.1 + HTTP/2 only (disable HTTP/3 / QUIC)
   servers {

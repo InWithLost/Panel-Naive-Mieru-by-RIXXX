@@ -386,7 +386,7 @@ if (fs.existsSync(TEMPLATE_JS)) {
   const panelPath = String(cfg.panelPath || '/admin').trim() || '/admin';
   const exposePanel = cfg.exposePanel === true;
   const panelBlock = exposePanel
-    ? '\n\n  handle_path ' + panelPath + '* {\n    reverse_proxy 127.0.0.1:' + (cfg.panelPort || 3000) + '\n  }'
+    ? '\n    @panel path ' + panelPath + ' ' + panelPath + '/*\n    reverse_proxy @panel 127.0.0.1:' + (cfg.panelPort || 3000)
     : '';
   let probeLine;
   if (probeMode === 'off') probeLine = '';
@@ -394,8 +394,6 @@ if (fs.existsSync(TEMPLATE_JS)) {
   else probeLine = '\n    probe_resistance';
   content = [
     '{',
-    '  order handle_path before forward_proxy',
-    '  order handle_path before file_server',
     '  order forward_proxy before file_server',
     '  servers {',
     '    protocols h1 h2',
@@ -788,7 +786,15 @@ smoke_test() {
 
   # v1.2.3: check caddy-naive (not legacy naive)
   check_svc caddy-naive
-  check_svc mita
+  local mita_users=0
+  if [[ -f "$MITA_STATE_FILE" ]]; then
+    mita_users=$(jq -r '(.users // []) | length' "$MITA_STATE_FILE" 2>/dev/null || echo 0)
+  fi
+  if [[ "$mita_users" -eq 0 ]]; then
+    echo -e "  ${YELLOW}⚠${NC}  mita inactive is expected until the first user is created"
+  else
+    check_svc mita
+  fi
 
   # caddy-naive version check
   if timeout 5 "$CADDY_BIN" version &>/dev/null 2>&1 || \
