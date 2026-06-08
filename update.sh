@@ -62,7 +62,7 @@ LEGACY_NAIVE_CONFIG_DIR="/etc/naive"
 CADDY_NAIVE_RELEASES="https://api.github.com/repos/klzgrad/forwardproxy/releases/latest"
 CADDY_NAIVE_FALLBACK_URL="https://github.com/klzgrad/forwardproxy/releases/download/v2.10.0-naive/caddy-forwardproxy-naive.tar.xz"
 MIERU_RELEASES="https://api.github.com/repos/enfein/mieru/releases/latest"
-REPO_URL="https://github.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX"
+REPO_URL="https://github.com/InWithLost/Panel-Naive-Mieru-by-RIXXX"
 
 # ── Flags ─────────────────────────────────────────────────────────────────────
 DRY_RUN=false

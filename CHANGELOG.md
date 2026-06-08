@@ -988,5 +988,5 @@ because the Exit node is a full Mieru server (`mita`), not a raw SOCKS5 endpoint
 
 ---
 
-[v1.1.0]: https://github.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX/compare/v1.0.0...v1.1.0
-[v1.0.0]: https://github.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX/releases/tag/v1.0.0
+[v1.1.0]: https://github.com/InWithLost/Panel-Naive-Mieru-by-RIXXX/compare/v1.0.0...v1.1.0
+[v1.0.0]: https://github.com/InWithLost/Panel-Naive-Mieru-by-RIXXX/releases/tag/v1.0.0

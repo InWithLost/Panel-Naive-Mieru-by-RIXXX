@@ -58,7 +58,7 @@ NAIVE_BIN="/usr/local/bin/naive"        # may still exist from v1.2.x; will be r
 NAIVE_CONFIG_DIR="/etc/naive"
 
 CURRENT_VERSION="1.2.6"
-REPO_URL="https://github.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX"
+REPO_URL="https://github.com/InWithLost/Panel-Naive-Mieru-by-RIXXX"
 # Bug 1: direct download URL for caddy-forwardproxy-naive (amd64 only)
 CADDY_NAIVE_RELEASES="https://api.github.com/repos/klzgrad/forwardproxy/releases/latest"
 CADDY_NAIVE_FALLBACK_URL="https://github.com/klzgrad/forwardproxy/releases/download/v2.10.0-naive/caddy-forwardproxy-naive.tar.xz"

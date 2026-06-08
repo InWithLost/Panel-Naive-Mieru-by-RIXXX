@@ -9,7 +9,7 @@
 **v1.2.6** — Веб-панель управления NaiveProxy + Mieru для Ubuntu/Debian VPS
 
 [![Telegram](https://img.shields.io/badge/Telegram-@russian__paradice__vpn-2CA5E0?logo=telegram&logoColor=white)](https://t.me/russian_paradice_vpn)
-[![GitHub](https://img.shields.io/badge/GitHub-cwash797--cmd-181717?logo=github)](https://github.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX)
+[![GitHub](https://img.shields.io/badge/GitHub-cwash797--cmd-181717?logo=github)](https://github.com/InWithLost/Panel-Naive-Mieru-by-RIXXX)
 [![License](https://img.shields.io/badge/License-MIT-bronze?color=c08552)](LICENSE)
 
 > 💬 **Поддержка и обновления:** [t.me/russian_paradice_vpn](https://t.me/russian_paradice_vpn)  
@@ -49,7 +49,7 @@
 
 ```bash
 # 1. Клонировать репозиторий
-git clone https://github.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX.git
+git clone https://github.com/InWithLost/Panel-Naive-Mieru-by-RIXXX.git
 cd Panel-Naive-Mieru-by-RIXXX
 
 # 2. Запустить установщик от root
