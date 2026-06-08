@@ -374,6 +374,18 @@ function deleteUser(id) {
   else memUsers.delete(id);
 }
 
+function scheduleConfigApply(reason) {
+  const timer = setTimeout(() => {
+    try {
+      const status = applyAllConfigs();
+      console.log('[CFG] async apply complete:', reason, JSON.stringify(status));
+    } catch (e) {
+      console.error('[CFG] async apply failed:', reason, e.message);
+    }
+  }, 250);
+  if (typeof timer.unref === 'function') timer.unref();
+}
+
 // ── Persist config ────────────────────────────────────────────────────────────
 // Bug 53: atomic write via .new temp file then rename — prevents partial reads
 //         if the process is interrupted during the write.
@@ -1341,18 +1353,18 @@ app.post('/api/users', requireAuth, (req, res) => {
     throw e;
   }
 
-  // Bug 6: rebuild Caddyfile + reload Caddy; rebuild mita state; report status
-  const svcStatus = applyAllConfigs();
   audit(updatedExisting ? 'user:upsert' : 'user:create',
     { id: user.id, username: user.username, protocols: validation.protocols, updatedExisting },
     req.session.username);
+  scheduleConfigApply(updatedExisting ? 'user:upsert' : 'user:create');
 
   const { passHash, password: _p, ...safe } = user;
   res.status(updatedExisting ? 200 : 201).json({
     ok: true,
     updatedExisting,
+    configsApplyQueued: true,
+    servicesReloaded: 'pending',
     ...parseUserRow(safe),
-    ...svcStatus
   });
 });
 
@@ -1411,11 +1423,11 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
     throw e;
   }
 
-  const svcStatus = applyAllConfigs();
   audit('user:update', { id: updated.id, username: updated.username, protocols: validation.protocols || updated.protocols }, req.session.username);
+  scheduleConfigApply('user:update');
 
   const { passHash, password: _p, ...safe } = updated;
-  res.json({ ok: true, ...parseUserRow(safe), ...svcStatus });
+  res.json({ ok: true, configsApplyQueued: true, servicesReloaded: 'pending', ...parseUserRow(safe) });
 });
 
 app.delete('/api/users/:id', requireAuth, (req, res) => {
@@ -1428,9 +1440,14 @@ app.delete('/api/users/:id', requireAuth, (req, res) => {
   }
   if (!user) return res.json({ ok: true, alreadyDeleted: true, servicesReloaded: true });
   deleteUser(user.id);
-  const svcStatus = applyAllConfigs();
   audit('user:delete', { id: user.id, username: user.username, matchedBy }, req.session.username);
-  res.json({ ok: true, deleted: { id: user.id, username: user.username, matchedBy }, ...svcStatus });
+  scheduleConfigApply('user:delete');
+  res.json({
+    ok: true,
+    configsApplyQueued: true,
+    servicesReloaded: 'pending',
+    deleted: { id: user.id, username: user.username, matchedBy }
+  });
 });
 
 // ── Server settings ───────────────────────────────────────────────────────────
@@ -2131,7 +2148,24 @@ app.post('/api/service/:name/:action', requireAuth, (req, res) => {
 });
 
 // ── WebSocket — real-time metrics ─────────────────────────────────────────────
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ noServer: true });
+server.on('upgrade', (req, socket, head) => {
+  let pathname = '';
+  try {
+    pathname = new URL(req.url, 'http://127.0.0.1').pathname.replace(/\/+$/g, '') || '/';
+  } catch {
+    socket.destroy();
+    return;
+  }
+  const panelWsPath = `${PANEL_BASE_PATH}/ws`;
+  if (pathname !== '/ws' && pathname !== panelWsPath) {
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, ws => {
+    wss.emit('connection', ws, req);
+  });
+});
 wss.on('connection', ws => {
   const exec_ = (cmd, args) => { try { return execFileSync(cmd, args, { timeout: 2000 }).toString().trim(); } catch { return ''; } };
   let iv;

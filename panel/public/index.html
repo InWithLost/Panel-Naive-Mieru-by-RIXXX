@@ -14,6 +14,10 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+<form id="user-form" class="hidden"></form>
+<form id="probe-form" class="hidden"></form>
+<form id="cascade-form" class="hidden"></form>
+<form id="panel-password-form" class="hidden"></form>
 
 <!-- ═══════════════════════════════════════════════════════════════
      LOGIN PAGE
@@ -312,7 +316,7 @@
               <div class="form-group">
                 <label data-i18n="users.passwordLabel">Password *</label>
                 <div class="input-pw-wrap">
-                  <input type="password" id="u-password" data-i18n-ph="users.passwordPlaceholder" placeholder="Minimum 8 chars" />
+                  <input type="password" id="u-password" form="user-form" data-i18n-ph="users.passwordPlaceholder" placeholder="Minimum 8 chars" />
                   <button type="button" class="btn-eye" data-action="toggle-pw" data-target="u-password" aria-label="Toggle password visibility">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   </button>
@@ -418,7 +422,7 @@
             <div class="form-group" id="probe-secret-group">
               <label data-i18n="settings.probeSecretLabel">Probe Secret (min 8 chars)</label>
               <div class="input-pw-wrap">
-                <input type="password" id="s-probe-secret"
+                <input type="password" id="s-probe-secret" form="probe-form"
                        data-i18n-ph="settings.probeSecretPlaceholder"
                        placeholder="Enter probe secret" autocomplete="off" />
                 <button type="button" class="btn-eye" data-action="toggle-pw" data-target="s-probe-secret" aria-label="Toggle visibility">
@@ -551,7 +555,7 @@
               </div>
               <div class="form-group">
                 <label data-i18n="settings.cascadeMieruPassLabel">Mieru exit password</label>
-                <input type="password" id="s-cascade-mieru-pass" placeholder="••••••• (оставьте пустым, чтобы не менять)" />
+                <input type="password" id="s-cascade-mieru-pass" form="cascade-form" placeholder="••••••• (оставьте пустым, чтобы не менять)" />
               </div>
             </div>
             <div class="alert alert-warning">
@@ -614,7 +618,7 @@
           <div class="card-body">
             <div class="form-group">
               <label for="s-cur-pass" data-i18n="settings.currentPassword">Current Password</label>
-              <input type="password" id="s-cur-pass"
+              <input type="password" id="s-cur-pass" form="panel-password-form"
                      data-i18n-ph="settings.currentPassword"
                      placeholder="Current password"
                      autocomplete="current-password"
@@ -622,7 +626,7 @@
             </div>
             <div class="form-group">
               <label for="s-new-pass" data-i18n="settings.newPassword">New Password</label>
-              <input type="password" id="s-new-pass"
+              <input type="password" id="s-new-pass" form="panel-password-form"
                      data-i18n-ph="settings.passwordTooShort"
                      placeholder="New password (min 8 chars)"
                      autocomplete="new-password"
@@ -630,7 +634,7 @@
             </div>
             <div class="form-group">
               <label for="s-new-pass2" data-i18n="settings.confirmPassword">Confirm New Password</label>
-              <input type="password" id="s-new-pass2"
+              <input type="password" id="s-new-pass2" form="panel-password-form"
                      data-i18n-ph="settings.confirmPassword"
                      placeholder="Repeat new password"
                      autocomplete="new-password"
