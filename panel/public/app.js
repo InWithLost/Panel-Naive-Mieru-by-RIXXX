@@ -576,7 +576,7 @@ async function saveUser() {
       }
     } else {
       const res = await api('POST', '/api/users', body);
-      toast(t('users.created'), 'success');
+      toast(res.updatedExisting ? (t('users.upserted') || t('users.updated')) : t('users.created'), 'success');
       if (res.servicesReloaded === false) {
         toast(t('users.serviceReloadWarning') || 'Service reload failed — check logs', 'error');
       }

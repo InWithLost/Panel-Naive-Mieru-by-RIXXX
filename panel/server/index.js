@@ -1287,38 +1287,55 @@ app.post('/api/users', requireAuth, (req, res) => {
   if (validation.error)
     return res.status(400).json({ error: validation.error });
 
-  const existingUsername = getUserByUsername(username);
-  if (existingUsername)
-    return sendUserConflict(res, 'username', existingUsername);
-
+  const normalizedUsername = String(username).trim();
   const normalizedEmail = normalizeUserEmail(email);
+  const existingUsername = getUserByUsername(normalizedUsername);
   const existingEmail = getUserByEmail(normalizedEmail);
-  if (existingEmail)
-    return sendUserConflict(res, 'email', existingEmail);
+  if (existingUsername && existingEmail && existingUsername.id !== existingEmail.id) {
+    return res.status(409).json({
+      error: 'Username and email belong to different users',
+      code: 'USER_CONFLICT_SPLIT',
+      usernameOwner: {
+        id: existingUsername.id,
+        username: existingUsername.username,
+        email: normalizeUserEmail(existingUsername.email)
+      },
+      emailOwner: {
+        id: existingEmail.id,
+        username: existingEmail.username,
+        email: normalizeUserEmail(existingEmail.email)
+      }
+    });
+  }
 
   if (expiry && isNaN(Date.parse(expiry)))
     return res.status(400).json({ error: 'expiry must be a valid ISO date string' });
 
   const now  = new Date().toISOString();
+  const existingUser = existingUsername || existingEmail || null;
+  const updatedExisting = Boolean(existingUser);
   const user = {
-    id:        uuidv4(),
+    ...(existingUser || {}),
+    id:        existingUser?.id || uuidv4(),
     // Email is optional: store NULL (not '') so the UNIQUE constraint allows
     // multiple users without an email.
     email:     normalizedEmail,
-    username,
+    username:  normalizedUsername,
     passHash:  bcrypt.hashSync(password, 12),
     password,
     expiry:    expiry || null,
     protocols: JSON.stringify(validation.protocols),
     quotaMB:   validation.quotaMB,
-    usedMB:    0,
-    createdAt: now, updatedAt: now, lastSeen: null
+    usedMB:    existingUser?.usedMB || 0,
+    createdAt: existingUser?.createdAt || now,
+    updatedAt: now,
+    lastSeen:  existingUser?.lastSeen || null
   };
   try {
     upsertUser(user);
   } catch (e) {
     if (isUniqueConstraintError(e, 'username'))
-      return sendUserConflict(res, 'username', getUserByUsername(username));
+      return sendUserConflict(res, 'username', getUserByUsername(normalizedUsername));
     if (isUniqueConstraintError(e, 'email'))
       return sendUserConflict(res, 'email', getUserByEmail(normalizedEmail));
     throw e;
@@ -1326,10 +1343,17 @@ app.post('/api/users', requireAuth, (req, res) => {
 
   // Bug 6: rebuild Caddyfile + reload Caddy; rebuild mita state; report status
   const svcStatus = applyAllConfigs();
-  audit('user:create', { id: user.id, username: user.username, protocols: validation.protocols }, req.session.username);
+  audit(updatedExisting ? 'user:upsert' : 'user:create',
+    { id: user.id, username: user.username, protocols: validation.protocols, updatedExisting },
+    req.session.username);
 
   const { passHash, password: _p, ...safe } = user;
-  res.status(201).json({ ok: true, ...parseUserRow(safe), ...svcStatus });
+  res.status(updatedExisting ? 200 : 201).json({
+    ok: true,
+    updatedExisting,
+    ...parseUserRow(safe),
+    ...svcStatus
+  });
 });
 
 app.put('/api/users/:id', requireAuth, (req, res) => {

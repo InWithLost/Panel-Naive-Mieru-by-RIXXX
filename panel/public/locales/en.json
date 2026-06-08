@@ -102,7 +102,8 @@
     "protocolRequired": "Select at least one protocol",
     "alreadyDeleted": "User is already deleted",
     "emailConflict": "Email already exists",
-    "usernameConflict": "Username already exists"
+    "usernameConflict": "Username already exists",
+    "upserted": "User already existed and was updated"
   },
   "config": {
     "downloadTitle": "Download Client Config",
